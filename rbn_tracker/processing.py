@@ -28,7 +28,8 @@ GONE_FLOOR = 1  # now <= this (with prior activity) -> GONE
 # Trend horizons (seconds) shown alongside the current interval. A trend over a
 # horizon compares the recent half of that window of history against the older
 # half. Tune the set here.
-TREND_HORIZONS = [("10m", 600), ("30m", 1800), ("60m", 3600)]
+# Labels use "min" (not "m") so they don't read as metre bands (40m vs 10min).
+TREND_HORIZONS = [("10min", 600), ("30min", 1800), ("60min", 3600)]
 MAX_HORIZON_SECS = max(secs for _label, secs in TREND_HORIZONS)
 # How many recent windows the "now"/recommendation trend looks at (keeps the
 # immediate signal responsive even though we retain an hour of history).

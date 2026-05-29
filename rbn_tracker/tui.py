@@ -146,7 +146,7 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
 
     # --- trends (multi-horizon) ---
     frame.append([("BAND TRENDS  ", "hdr"),
-                  ("distinct DX spotters: now / 10m / 30m / 60m", "dim")])
+                  ("distinct DX spotters: now / 10min / 30min / 60min", "dim")])
     for band in bands:
         series = band_spotter_series(history, band)
         spark = sparkline(series, uc)

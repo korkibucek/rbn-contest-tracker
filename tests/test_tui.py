@@ -36,8 +36,8 @@ class TestBuildFrame(unittest.TestCase):
         self.assertIn("YOUR STATION", text)
         self.assertIn("MM1E", text)
         self.assertIn("15m", text)
-        # multi-horizon labels
-        for h in ("now", "10m", "30m", "60m"):
+        # multi-horizon labels (use "min" so they don't read as metre bands)
+        for h in ("now", "10min", "30min", "60min"):
             self.assertIn(h, text)
 
     def test_not_spotted_message(self):
