@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from .analysis import (
     band_horizon_trends,
     best_band_per_continent,
+    display_bands,
     mm_current_band,
     mm_horizon_trends,
     recommended_dx_band,
@@ -111,7 +112,7 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     frame.append([(_legend_text(uc), "dim")])
     frame.append([("", "normal")])
 
-    bands = summary.active_bands()
+    bands = display_bands(summary, history)
 
     # --- matrix ---
     cross = "×" if uc else "x"
@@ -125,7 +126,8 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     head.append(("   now", "dim"))
     frame.append(head)
     if not bands:
-        frame.append([("  (no UK/IE spots in the current window)", "dim")])
+        frame.append([("  (no UK/IE spots in the current window or recent "
+                       "history)", "dim")])
     for band in bands:
         line: Line = [(f"{band:<6}", "accent")]
         for cont in MATRIX_COLS:
