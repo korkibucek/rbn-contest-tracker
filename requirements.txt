@@ -1,0 +1,6 @@
+# No third-party packages are required — the tracker runs on the Python
+# standard library alone (Python 3.10+).
+#
+# Optional: `rich` enables nicer terminal colour. The application degrades
+# gracefully without it, so it is intentionally NOT a hard dependency.
+# rich>=13
