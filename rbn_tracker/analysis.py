@@ -6,6 +6,7 @@ can never drift apart in how they rank bands or pick the QSY suggestion.
 
 from __future__ import annotations
 
+from .bands import band_sort_key
 from .processing import (
     DX_CONTINENTS,
     FADING,
@@ -26,6 +27,21 @@ from .processing import (
 # Trend weighting for the recommendation engine: a band that is opening should
 # outrank a higher-count band that is closing.
 TREND_WEIGHT = {RISING: 1.6, NEW: 1.4, STEADY: 1.0, FADING: 0.45, GONE: 0.1}
+
+
+def display_bands(summary: WindowSummary,
+                  history: list[WindowSummary]) -> list[str]:
+    """Bands worth showing: active in the current window OR seen in history.
+
+    This keeps a band on screen as it fades through quiet/zero windows (so the
+    trend stays visible) instead of vanishing the moment a window has no spots.
+    A band drops off only once it has been silent across the entire retained
+    history (an hour), at which point it no longer appears in any window's cells.
+    """
+    bands = set(summary.active_bands())
+    for w in history:
+        bands.update(b for (b, _c) in w.cells)
+    return sorted(bands, key=band_sort_key)
 
 
 def band_trend(history: list[WindowSummary], band: str,

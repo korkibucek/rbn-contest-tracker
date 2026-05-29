@@ -49,6 +49,24 @@ class TestBuildFrame(unittest.TestCase):
                             TuiState(now=60))
         self.assertIn("not spotted", flatten_frame(frame))
 
+    def test_quiet_window_keeps_band_visible(self):
+        # A band active earlier must still render (fading) during an empty
+        # window, rather than vanishing -- the zero window is tracked, not wiped.
+        proc = SpotProcessor("MM1E", window_secs=60, history=5)
+        for i, sp in enumerate(["W3LPL-#", "K1TTT-#", "N4ZR-#"]):
+            proc.add(spot(sp, "G4ABC", 21025, 15, t=10 + i))
+        proc.commit(60)
+        proc.prune(60)
+        proc.commit(120)  # quiet window: no UK spots at all
+        proc.prune(120)
+        cfg = RenderConfig(mycall="MM1E", use_unicode=False, window_secs=60)
+        frame = build_frame(proc.snapshot(120), list(proc.history), cfg,
+                            TuiState(now=120))
+        text = flatten_frame(frame)
+        self.assertIn("15m", text)          # band still shown
+        self.assertIn("BAND TRENDS", text)  # trends panel populated
+        self.assertNotIn("recent history)", text)  # not the empty-state message
+
     def test_ascii_mode_is_pure_ascii(self):
         proc = _proc_with_data()
         cfg = RenderConfig(mycall="MM1E", use_unicode=False, window_secs=60)

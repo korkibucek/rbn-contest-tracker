@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from .analysis import (
     band_horizon_trends,
     best_band_per_continent,
+    display_bands,
     mm_current_band,
     mm_horizon_trends,
     recommended_dx_band,
@@ -110,10 +111,10 @@ def _render_header(summary: WindowSummary, cfg: RenderConfig) -> list[str]:
 
 def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
                    cfg: RenderConfig) -> list[str]:
-    bands = summary.active_bands()
+    bands = display_bands(summary, history)
     lines = ["", "BAND x CONTINENT  (spots, distinct-spotters in parens)", ""]
     if not bands:
-        lines.append("  (no UK/IE spots this window)")
+        lines.append("  (no UK/IE spots this window or recent history)")
         return lines
 
     col_w = 11
@@ -138,7 +139,7 @@ def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
 
 def _render_trends(summary: WindowSummary, history: list[WindowSummary],
                    cfg: RenderConfig) -> list[str]:
-    bands = summary.active_bands()
+    bands = display_bands(summary, history)
     lines = ["",
              "BAND TRENDS (distinct DX spotters)   " + _legend(cfg.use_unicode),
              ""]
