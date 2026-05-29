@@ -26,6 +26,22 @@ No third-party packages are required (standard library only). `rich` is
 optional and the output degrades gracefully without it; Unicode sparklines fall
 back to ASCII automatically (or force it with `--ascii`).
 
+### macOS deployment (virtualenv)
+
+A venv isn't strictly required (the app is pure standard library) but it keeps
+the install isolated from the system / Homebrew / python.org Pythons:
+
+```bash
+./deploy/install_macos.sh              # creates .venv, verifies via unit tests
+./deploy/install_macos.sh --with-rich  # also install optional rich
+./deploy/run.sh --csv contest.csv      # launch (args pass through to the CLI)
+```
+
+`install_macos.sh` finds a Python 3.10+ interpreter (suggesting
+`brew install python@3.12` if none is new enough), builds `.venv`, and runs the
+test suite to confirm the install. `run.sh` is a thin launcher that execs the
+venv's Python against `python -m rbn_tracker`.
+
 ## CLI flags
 
 | Flag | Default | Meaning |
