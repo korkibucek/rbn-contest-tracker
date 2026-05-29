@@ -49,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "receive time, otherwise times auto-increment")
     p.add_argument("--ascii", action="store_true",
                    help="force ASCII sparklines/arrows (no Unicode)")
+    p.add_argument("--tui", action="store_true",
+                   help="force the full-screen interactive viewer")
+    p.add_argument("--no-tui", action="store_true",
+                   help="force the classic scrolling line report")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     return p
 
@@ -61,10 +65,12 @@ def _supports_unicode() -> bool:
 class Reader:
     """Background thread: pulls lines from a feed, parses, feeds the processor."""
 
-    def __init__(self, feed, processor: SpotProcessor, lock: threading.Lock):
+    def __init__(self, feed, processor: SpotProcessor, lock: threading.Lock,
+                 state=None):
         self.feed = feed
         self.processor = processor
         self.lock = lock
+        self.state = state  # optional TuiState to update live counters
         self.thread = threading.Thread(target=self._run, daemon=True)
         self._stop = False
         self.parsed = 0
@@ -85,6 +91,8 @@ class Reader:
                 spot = parse_spot(line, recv_time=time.time())
             except SpotParseError:
                 self.skipped += 1
+                if self.state is not None:
+                    self.state.skipped = self.skipped
                 log.debug("skip line: %r", line)
                 continue
             except Exception as exc:  # never crash the reader on a bad line
@@ -92,8 +100,37 @@ class Reader:
                 log.debug("error parsing %r: %s", line, exc)
                 continue
             self.parsed += 1
+            if self.state is not None:
+                self.state.spots_seen = self.parsed
             with self.lock:
                 self.processor.add(spot)
+
+
+def run_tui_live(args, processor, cfg, csv_writer) -> int:
+    """Live feed rendered in the full-screen curses viewer."""
+    from .tui import TuiState, run_tui
+
+    feed = TelnetFeed(args.callsign)
+    lock = threading.Lock()
+    state = TuiState(source="live", started_at=time.time())
+    reader = Reader(feed, processor, lock, state=state)
+    reader.start()
+    log.info("starting interactive viewer (press q to quit)")
+
+    def pre(st: TuiState) -> None:
+        st.connected = getattr(feed, "connected", False)
+
+    def on_commit(summary, history) -> None:
+        if csv_writer:
+            csv_writer.write_window(summary, history)
+
+    try:
+        run_tui(processor, cfg, state, lock, on_commit=on_commit, pre_render=pre)
+    finally:
+        reader.stop()
+        if csv_writer:
+            csv_writer.close()
+    return 0
 
 
 def run_live(args, processor, cfg, csv_writer) -> int:
@@ -220,9 +257,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     csv_writer = CsvWriter(args.csv) if args.csv else None
 
+    # The full-screen viewer is the default for an interactive live session.
+    # It's disabled for --replay/--once and when stdout isn't a TTY (piped or
+    # redirected), unless explicitly forced with --tui.
+    interactive = sys.stdout.isatty() and not args.once and not args.replay
+    use_tui = args.tui or (interactive and not args.no_tui)
+
     try:
         if args.replay:
             return run_replay(args, processor, cfg, csv_writer)
+        if use_tui:
+            try:
+                return run_tui_live(args, processor, cfg, csv_writer)
+            except Exception as exc:  # curses unavailable -> fall back gracefully
+                log.warning("interactive viewer unavailable (%s); "
+                            "falling back to line report", exc)
         return run_live(args, processor, cfg, csv_writer)
     except KeyboardInterrupt:
         if csv_writer:

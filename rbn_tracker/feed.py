@@ -33,6 +33,7 @@ class TelnetFeed:
         self.port = port
         self.connect_timeout = connect_timeout
         self._stop = False
+        self.connected = False  # True between successful login and disconnect
 
     def stop(self) -> None:
         self._stop = True
@@ -94,12 +95,14 @@ class TelnetFeed:
                 log.info("connecting to %s:%d ...", self.host, self.port)
                 sock = self._connect()
                 self._login(sock)
+                self.connected = True
                 attempt = 0  # reset backoff on a successful connect+login
                 sock.settimeout(120.0)
                 yield from self._read_lines(sock)
             except (OSError, socket.timeout) as exc:
                 log.warning("feed connection error: %s", exc)
             finally:
+                self.connected = False
                 try:
                     sock.close()  # type: ignore[has-type]
                 except Exception:

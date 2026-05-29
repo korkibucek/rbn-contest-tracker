@@ -5,19 +5,18 @@ Kept in its own module so the band plan is easy to extend or tweak.
 
 from __future__ import annotations
 
-# (low_khz, high_khz, label) -- inclusive ranges, edges as given in the spec.
+# HF contest bands only. The WARC bands (30m/17m/12m) and 60m are excluded
+# (contesting isn't permitted there), and 6m is excluded too -- this tool is for
+# HF contesting. Frequencies outside these segments map to UNKNOWN_BAND ("?").
+#
+# (low_khz, high_khz, label) -- inclusive ranges.
 BAND_PLAN: list[tuple[float, float, str]] = [
     (1800.0, 2000.0, "160m"),
     (3500.0, 4000.0, "80m"),
-    (5351.0, 5366.0, "60m"),
     (7000.0, 7300.0, "40m"),
-    (10100.0, 10150.0, "30m"),
     (14000.0, 14350.0, "20m"),
-    (18068.0, 18168.0, "17m"),
     (21000.0, 21450.0, "15m"),
-    (24890.0, 24990.0, "12m"),
     (28000.0, 29700.0, "10m"),
-    (50000.0, 54000.0, "6m"),
 ]
 
 UNKNOWN_BAND = "?"

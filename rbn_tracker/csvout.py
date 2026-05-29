@@ -6,17 +6,14 @@ import csv
 import os
 import time
 
+from .analysis import band_horizon_trends, mm_horizon_trends
 from .continents import CONTINENTS
-from .processing import (
-    WindowSummary,
-    band_spotter_series,
-    classify_trend,
-    mm_band_series,
-)
+from .processing import WindowSummary
 
 CSV_HEADER = [
     "utc_time", "window_secs", "section", "band", "continent",
-    "spots", "distinct_uk", "distinct_spotters", "median_snr", "trend",
+    "spots", "distinct_uk", "distinct_spotters", "median_snr",
+    "trend_now", "trend_10m", "trend_30m", "trend_60m",
 ]
 
 
@@ -38,7 +35,7 @@ class CsvWriter:
         win = int(round(summary.end_time - summary.start_time))
 
         for band in summary.active_bands():
-            band_trend = classify_trend(band_spotter_series(history, band))
+            trends = [t for _label, t in band_horizon_trends(history, band, win)]
             for cont in CONTINENTS:
                 cell = summary.cell(band, cont)
                 if not cell or cell.count == 0:
@@ -47,12 +44,12 @@ class CsvWriter:
                 self._writer.writerow([
                     utc, win, "cohort", band, cont,
                     cell.count, cell.distinct_uk, cell.distinct_spotters,
-                    med, band_trend,
+                    med, *trends,
                 ])
 
         # MM1E rows
         for band in summary.mm_bands():
-            mm_trend = classify_trend(mm_band_series(history, band))
+            trends = [t for _label, t in mm_horizon_trends(history, band, win)]
             for cont in CONTINENTS:
                 obs = summary.mm.get((band, cont))
                 if not obs:
@@ -60,7 +57,7 @@ class CsvWriter:
                 med = "" if obs.median_snr is None else f"{obs.median_snr:.0f}"
                 self._writer.writerow([
                     utc, win, "mm", band, cont,
-                    len(obs.snrs), 1, obs.distinct_spotters, med, mm_trend,
+                    len(obs.snrs), 1, obs.distinct_spotters, med, *trends,
                 ])
         self._fh.flush()
 
