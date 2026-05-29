@@ -13,7 +13,7 @@ from .processing import WindowSummary
 CSV_HEADER = [
     "utc_time", "window_secs", "section", "band", "continent",
     "spots", "distinct_uk", "distinct_spotters", "median_snr",
-    "trend_now", "trend_10m", "trend_30m", "trend_60m",
+    "trend_now", "trend_10min", "trend_30min", "trend_60min",
 ]
 
 

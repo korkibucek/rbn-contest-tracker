@@ -76,7 +76,7 @@ def _fmt_snr(snr: float | None) -> str:
 
 
 def _horizon_strip(trends: list[tuple[str, str]], use_unicode: bool) -> str:
-    """Render multi-horizon trends as e.g. 'now ↑  10m ↑  30m →  60m ↓'."""
+    """Render multi-horizon trends as e.g. 'now ↑  10min ↑  30min →  60min ↓'."""
     return "  ".join(f"{label} {arrow(trend, use_unicode)}"
                      for label, trend in trends)
 
