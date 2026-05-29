@@ -11,10 +11,16 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 
-from .bands import band_sort_key
+from .analysis import (
+    band_horizon_trends,
+    best_band_per_continent,
+    mm_current_band,
+    mm_horizon_trends,
+    recommended_dx_band,
+    score_bands,
+)
 from .continents import CONTINENTS
 from .processing import (
-    DX_CONTINENTS,
     FADING,
     GONE,
     NEW,
@@ -23,13 +29,8 @@ from .processing import (
     WindowSummary,
     band_spotter_series,
     cell_spotter_series,
-    classify_trend,
     mm_band_series,
 )
-
-# Trend weighting for the recommendation engine: a band that is opening should
-# outrank a higher-count band that is closing.
-TREND_WEIGHT = {RISING: 1.6, NEW: 1.4, STEADY: 1.0, FADING: 0.45, GONE: 0.1}
 
 _SPARK_UNICODE = "▁▂▃▄▅▆▇█"
 _SPARK_ASCII = "_.-=+*#@"
@@ -74,8 +75,16 @@ def _fmt_snr(snr: float | None) -> str:
     return f"{snr:+.0f}dB"
 
 
-def _band_trend(history: list[WindowSummary], band: str) -> str:
-    return classify_trend(band_spotter_series(history, band))
+def _horizon_strip(trends: list[tuple[str, str]], use_unicode: bool) -> str:
+    """Render multi-horizon trends as e.g. 'now ↑  10m ↑  30m →  60m ↓'."""
+    return "  ".join(f"{label} {arrow(trend, use_unicode)}"
+                     for label, trend in trends)
+
+
+def _legend(use_unicode: bool) -> str:
+    a = lambda t: arrow(t, use_unicode)  # noqa: E731
+    return (f"({a(RISING)} rising  {a(FADING)} fading  {a(STEADY)} steady  "
+            f"{a(NEW)} new  {a(GONE)} gone)")
 
 
 def _prev_now(series: list[int]) -> tuple[int, int]:
@@ -109,7 +118,7 @@ def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
 
     col_w = 11
     head = f"{'band':<6}" + "".join(f"{c:>{col_w}}" for c in MATRIX_COLS)
-    head += "   trend"
+    head += "   now"
     lines.append(head)
     lines.append("-" * len(head))
 
@@ -121,51 +130,42 @@ def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
                 row += f"{cell.count:>4}({cell.distinct_spotters:>2}){'':>{col_w-8}}"
             else:
                 row += f"{'.':>{col_w}}"
-        series = band_spotter_series(history, band)
-        trend = classify_trend(series)
-        prev, cur = _prev_now(series)
-        spark = sparkline(series, cfg.use_unicode)
-        row += f"   {spark} {prev}->{cur} {arrow(trend, cfg.use_unicode)} {trend}"
+        now_trend = band_horizon_trends(history, band, cfg.window_secs)[0][1]
+        row += f"   {arrow(now_trend, cfg.use_unicode)} {now_trend}"
         lines.append(row)
     return lines
 
 
-def _band_dx_stats(summary: WindowSummary, band: str) -> tuple[int, int]:
-    """(distinct spotters into DX continents, total DX spot count) for band."""
-    spotters: set[str] = set()
-    count = 0
-    for cont in DX_CONTINENTS:
-        cell = summary.cell(band, cont)
-        if cell:
-            spotters |= cell.spotters
-            count += cell.count
-    return len(spotters), count
+def _render_trends(summary: WindowSummary, history: list[WindowSummary],
+                   cfg: RenderConfig) -> list[str]:
+    bands = summary.active_bands()
+    lines = ["",
+             "BAND TRENDS (distinct DX spotters)   " + _legend(cfg.use_unicode),
+             ""]
+    if not bands:
+        return lines
+    for band in bands:
+        series = band_spotter_series(history, band)
+        spark = sparkline(series, cfg.use_unicode)
+        trends = band_horizon_trends(history, band, cfg.window_secs)
+        lines.append(
+            f"  {band:<5} {spark:<10}  {_horizon_strip(trends, cfg.use_unicode)}"
+        )
+    return lines
 
 
 def _render_recommendation(summary: WindowSummary,
                            history: list[WindowSummary],
                            cfg: RenderConfig) -> list[str]:
     lines = ["", "BAND RECOMMENDATION (working DX -- activity into non-EU)", ""]
-    bands = summary.active_bands()
 
-    # Score each band for DX, trend-weighted.
-    scored = []
-    for band in bands:
-        dx_spotters, dx_count = _band_dx_stats(summary, band)
-        if dx_spotters == 0 and dx_count == 0:
-            continue
-        trend = _band_trend(history, band)
-        weight = TREND_WEIGHT.get(trend, 1.0)
-        score = (dx_spotters + 0.1 * dx_count) * weight
-        scored.append((score, band, dx_spotters, dx_count, trend))
-
+    scored = score_bands(summary, history)
     if not scored:
         lines.append("  No DX (non-EU) activity from UK/IE this window.")
         lines.append("  Either EU-only conditions, or thin skimmer coverage "
                      "into DX -- watch the trends.")
         return lines
 
-    scored.sort(reverse=True)
     top = scored[0]
     lines.append(
         f"  TOP DX BAND: {top[1]}  "
@@ -175,22 +175,11 @@ def _render_recommendation(summary: WindowSummary,
     # Best band per open DX continent.
     lines.append("")
     lines.append("  Best band per continent:")
-    for cont in DX_CONTINENTS:
-        best = None
-        for band in bands:
-            cell = summary.cell(band, cont)
-            if not cell or cell.count == 0:
-                continue
-            trend = _band_trend(history, band)
-            w = TREND_WEIGHT.get(trend, 1.0)
-            val = cell.distinct_spotters * w
-            cand = (val, band, cell, trend)
-            if best is None or cand[0] > best[0]:
-                best = cand
+    for cont, best in best_band_per_continent(summary, history).items():
         if best is None:
             lines.append(f"    {cont}: closed (no UK/IE spots heard there)")
             continue
-        _val, band, cell, trend = best
+        band, cell, trend = best
         cser = cell_spotter_series(history, band, cont)
         prev, cur = _prev_now(cser)
         lines.append(
@@ -200,26 +189,6 @@ def _render_recommendation(summary: WindowSummary,
             f"{prev}->{cur} {arrow(trend, cfg.use_unicode)} {trend}"
         )
     return lines
-
-
-def _recommended_dx_band(summary: WindowSummary,
-                         history: list[WindowSummary]) -> tuple[str, str, int] | None:
-    """Return (band, continent, spotters) of the single best DX opportunity."""
-    best = None
-    for band in summary.active_bands():
-        trend = _band_trend(history, band)
-        w = TREND_WEIGHT.get(trend, 1.0)
-        for cont in DX_CONTINENTS:
-            cell = summary.cell(band, cont)
-            if not cell or cell.count == 0:
-                continue
-            val = cell.distinct_spotters * w
-            cand = (val, band, cont, cell.distinct_spotters)
-            if best is None or cand[0] > best[0]:
-                best = cand
-    if best is None:
-        return None
-    return best[1], best[2], best[3]
 
 
 def _render_mm(summary: WindowSummary, history: list[WindowSummary],
@@ -234,23 +203,16 @@ def _render_mm(summary: WindowSummary, history: list[WindowSummary],
         )
         return lines
 
-    mm_current_band = None
-    best_band_spotters = -1
-    for band in summary.mm_bands():
-        sp = summary.mm_band_spotters(band)
-        if sp > best_band_spotters:
-            best_band_spotters = sp
-            mm_current_band = band
+    current_band = mm_current_band(summary)
 
     for band in summary.mm_bands():
         series = mm_band_series(history, band)
-        trend = classify_trend(series)
-        prev, cur = _prev_now(series)
+        trends = mm_horizon_trends(history, band, cfg.window_secs)
         total_sp = summary.mm_band_spotters(band)
         lines.append(
             f"  {me} {band}: {total_sp} distinct spotters total   "
-            f"{sparkline(series, cfg.use_unicode)} {prev}->{cur} "
-            f"{arrow(trend, cfg.use_unicode)} {trend}"
+            f"{sparkline(series, cfg.use_unicode)}  "
+            f"{_horizon_strip(trends, cfg.use_unicode)}"
         )
         for cont in CONTINENTS:
             obs = summary.mm.get((band, cont))
@@ -265,14 +227,13 @@ def _render_mm(summary: WindowSummary, history: list[WindowSummary],
             )
 
     # QSY suggestion: compare my current band to the best DX opportunity.
-    rec = _recommended_dx_band(summary, history)
-    if rec and mm_current_band:
+    rec = recommended_dx_band(summary, history)
+    if rec and current_band:
         rec_band, rec_cont, rec_sp = rec
-        if rec_band != mm_current_band:
-            mm_dx_sp, _ = _band_dx_stats(summary, mm_current_band)
+        if rec_band != current_band:
             lines.append("")
             lines.append(
-                f"  >> QSY SUGGESTION: you're strongest on {mm_current_band}, "
+                f"  >> QSY SUGGESTION: you're strongest on {current_band}, "
                 f"but the cohort data says {rec_band} is the band into "
                 f"{rec_cont} right now ({rec_sp} distinct spotters). "
                 "Consider a move."
@@ -298,6 +259,7 @@ def format_report(summary: WindowSummary, history: list[WindowSummary],
     lines: list[str] = []
     lines += _render_header(summary, cfg)
     lines += _render_matrix(summary, history, cfg)
+    lines += _render_trends(summary, history, cfg)
     lines += _render_recommendation(summary, history, cfg)
     lines += _render_mm(summary, history, cfg)
     lines += _render_footer()

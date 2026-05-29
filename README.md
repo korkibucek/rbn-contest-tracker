@@ -1,30 +1,50 @@
 # RBN Contest Tracker
 
 A Python CLI that connects to the [Reverse Beacon Network](https://www.reversebeacon.net/)
-telnet aggregator and prints a **once-per-minute propagation / band-recommendation
-report** based on where UK & Ireland CW stations are being heard — with
-cross-window **trend tracking** and a dedicated section for your own station
-(default **MM1E**).
+telnet aggregator and shows a **live, full-screen propagation / band-recommendation
+viewer** (think `top`, for an HF CW contest) based on where UK & Ireland stations
+are being heard — with multi-horizon **trend tracking** and a dedicated section
+for your own station (default **MM1E**).
 
 It answers, mid-contest, between runs: *which band should I be on to work DX
 right now, and is my own signal getting out?*
 
+Covers the **HF contest bands only** — 160 / 80 / 40 / 20 / 15 / 10 m. The WARC
+bands (30/17/12 m), 60 m and 6 m are excluded, since contesting doesn't happen
+there; spots on those segments are ignored.
+
 ## Quick start
 
 ```bash
-# Live: connect to RBN, log in as M0TTT, report every 60s, track MM1E
+# Live: connect to RBN, log in as M0TTT, track MM1E — opens the full-screen viewer
 python3 -m rbn_tracker
 
 # Custom login + tracked station + CSV logging
 python3 -m rbn_tracker --callsign M0TTT --mycall MM1E --csv contest.csv
 
+# Classic scrolling line report instead of the viewer
+python3 -m rbn_tracker --no-tui
+
 # Replay a captured/synthetic feed (no network needed) — great for testing
 python3 -m rbn_tracker --replay samples/sample_feed.txt --ascii
 ```
 
-No third-party packages are required (standard library only). `rich` is
-optional and the output degrades gracefully without it; Unicode sparklines fall
-back to ASCII automatically (or force it with `--ascii`).
+### Interactive viewer
+
+When run live in a terminal, the tracker opens a full-screen viewer that
+refreshes in place (~1 s) over a rolling window — no scrolling log to chase.
+
+- **`q`** quit · **`p`** pause/resume the refresh so you can read mid-run.
+- A status bar shows the clock, uptime, connection state, spots/window and the
+  tracked call; panels below show the band×continent matrix, multi-horizon band
+  trends, the DX recommendation, and your own station.
+- It falls back automatically to the classic line report when stdout isn't a
+  TTY (piped/redirected), with `--no-tui`, or with `--once`/`--replay`. Force it
+  with `--tui`.
+
+No third-party packages are required (standard library only) — the viewer is
+built on `curses`. Unicode sparklines/arrows fall back to ASCII automatically
+(or force it with `--ascii`).
 
 ### macOS deployment (virtualenv)
 
@@ -48,40 +68,52 @@ venv's Python against `python -m rbn_tracker`.
 |------|---------|---------|
 | `--callsign` | `M0TTT` | Callsign used to log in to the RBN feed |
 | `--mycall` | `MM1E` | Station tracked in the "me" section |
-| `--window SECONDS` | `60` | Window length |
-| `--history N` | `5` | Number of windows kept for trend analysis |
+| `--window SECONDS` | `60` | Window length (the "current interval") |
+| `--history N` | `5` | Windows used for the responsive "now"/recommendation trend (an hour of history is always retained for the longer horizons) |
 | `--csv FILE` | – | Append per-window, per-cell stats to a CSV |
 | `--min-snr DB` | – | Ignore spots weaker than this |
+| `--tui` | auto | Force the full-screen interactive viewer |
+| `--no-tui` | off | Force the classic scrolling line report |
 | `--once` | off | Emit a single window then exit (testing) |
 | `--replay FILE` | – | Replay raw spot lines instead of connecting |
 | `--ascii` | off | Force ASCII sparklines/arrows |
 | `-v/--verbose` | off | Debug logging |
 
-`Ctrl-C` shuts down cleanly and flushes any pending CSV writes.
+`Ctrl-C` (or `q` in the viewer) shuts down cleanly and flushes pending CSV writes.
 
-## What the report contains
+## What it shows
 
-1. **Header** — UTC time, total spots, total UK/IE spots, tracked call.
+1. **Status bar** — UTC clock, uptime, connection state, spots/window, total
+   UK/IE spots, tracked call.
 2. **Band × continent matrix** — rows are active bands, columns are
-   `NA SA EU AF AS OC`. Each cell shows `spots(distinct-spotters)`, and each row
-   carries a sparkline + `prev→now` + trend label.
-3. **Band recommendation** — bands ranked for working DX (activity into non-EU
+   `NA SA EU AF AS OC`. Each cell shows `spots(distinct-spotters)`, with the
+   current-interval trend arrow per band.
+3. **Band trends** — for each band, a sparkline and the trend at four horizons:
+   the **current interval, 10 min, 30 min and 60 min**.
+4. **Band recommendation** — bands ranked for working DX (activity into non-EU
    continents), **trend-weighted** so a *rising* band outranks a higher-count
    but *fading* one. Top overall band, best band per open continent (with a
    one-line justification), and which continents look closed.
-4. **Your station (MM1E)** — bands you were spotted on, distinct spotters per
-   band, continents reached, best/median SNR, CW speed, and the same trend
-   logic across windows. If you weren't spotted it says so plainly. If you're
-   on a different band than the data recommends, it prints a **QSY suggestion**.
-5. **Footer caveat** — RBN coverage is dense in NA/EU and thin in AF/SA/OC, so
+5. **Your station (MM1E)** — bands you were spotted on, distinct spotters per
+   band, continents reached, best/median SNR, CW speed, and the same
+   multi-horizon trend logic. If you weren't spotted it says so plainly. If
+   you're on a different band than the data recommends, it prints a **QSY
+   suggestion**.
+6. **Footer caveat** — RBN coverage is dense in NA/EU and thin in AF/SA/OC, so
    lean on trends and distinct-spotter counts, not absolute numbers.
 
 ## Trends
 
 Trends are computed on the **distinct-spotter** series for a band (less noisy
-than raw spot counts) over the last `--history` windows. Each active band is
-classified `RISING / STEADY / FADING / NEW / GONE`. All thresholds are constants
-at the top of [`rbn_tracker/processing.py`](rbn_tracker/processing.py).
+than raw spot counts) and classified `RISING / STEADY / FADING / NEW / GONE`.
+
+Each band is reported at four **horizons** — the current interval (window vs the
+previous one) plus **10 / 30 / 60 minutes** — so you can tell a one-window blip
+from a real, sustained opening. The longer horizons compare the recent half of
+that period against the older half; the current interval and the recommendation
+use a responsive short window (`--history`). An hour of window history is always
+retained for the 60-minute horizon. All thresholds and the horizon set are
+constants at the top of [`rbn_tracker/processing.py`](rbn_tracker/processing.py).
 
 ## Module layout
 
@@ -89,10 +121,12 @@ at the top of [`rbn_tracker/processing.py`](rbn_tracker/processing.py).
 |--------|----------------|
 | `rbn_tracker/callsign.py` | Callsign splitting + UK/IE prefix matching |
 | `rbn_tracker/continents.py` | Prefix → continent table (extensible) |
-| `rbn_tracker/bands.py` | Frequency (kHz) → band mapping |
+| `rbn_tracker/bands.py` | Frequency (kHz) → HF contest band mapping |
 | `rbn_tracker/spots.py` | Spot-line parsing |
 | `rbn_tracker/processing.py` | Windowing, aggregation, trend logic |
-| `rbn_tracker/report.py` | Report rendering, recommendation, MM1E section |
+| `rbn_tracker/analysis.py` | Recommendation/scoring + horizon trends (shared) |
+| `rbn_tracker/report.py` | Classic text report rendering |
+| `rbn_tracker/tui.py` | Full-screen interactive viewer (curses) |
 | `rbn_tracker/feed.py` | Telnet feed (reconnect/backoff) + replay |
 | `rbn_tracker/csvout.py` | CSV logging |
 | `rbn_tracker/cli.py` | Argument parsing + main loop |

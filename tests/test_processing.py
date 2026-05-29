@@ -9,7 +9,9 @@ from rbn_tracker.processing import (
     RISING,
     STEADY,
     SpotProcessor,
+    classify_horizon,
     classify_trend,
+    windows_for_secs,
 )
 from rbn_tracker.spots import parse_spot
 
@@ -36,6 +38,34 @@ class TestTrend(unittest.TestCase):
     def test_steady(self):
         self.assertEqual(classify_trend([8, 8, 8]), STEADY)
         self.assertEqual(classify_trend([8, 9, 9]), STEADY)
+
+
+class TestHorizonTrend(unittest.TestCase):
+    def test_windows_for_secs(self):
+        self.assertEqual(windows_for_secs(600, 60), 10)
+        self.assertEqual(windows_for_secs(1800, 60), 30)
+        self.assertEqual(windows_for_secs(3600, 60), 60)
+        self.assertEqual(windows_for_secs(600, 300), 2)  # never below 2
+
+    def test_rising_over_horizon(self):
+        # Older half low, newer half high.
+        self.assertEqual(classify_horizon([1, 1, 2, 5, 6, 7], 6), RISING)
+
+    def test_fading_over_horizon(self):
+        self.assertEqual(classify_horizon([8, 7, 6, 2, 1, 1], 6), FADING)
+
+    def test_steady_over_horizon(self):
+        self.assertEqual(classify_horizon([5, 6, 5, 6, 5, 6], 6), STEADY)
+
+    def test_new_over_horizon(self):
+        self.assertEqual(classify_horizon([0, 0, 0, 4, 5, 6], 6), NEW)
+
+    def test_gone_over_horizon(self):
+        self.assertEqual(classify_horizon([6, 5, 6, 0, 0, 0], 6), GONE)
+
+    def test_uses_only_last_n_windows(self):
+        # A big early spike is outside the 2-window horizon -> ignored.
+        self.assertEqual(classify_horizon([50, 1, 1], 2), STEADY)
 
 
 class TestWindowing(unittest.TestCase):

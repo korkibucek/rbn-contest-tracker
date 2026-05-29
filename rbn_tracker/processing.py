@@ -25,6 +25,15 @@ NEAR_ZERO_SPOTTERS = 1  # <= this counts as effectively no activity
 MEANINGFUL_SPOTTERS = 2  # >= this is a real opening (for NEW)
 GONE_FLOOR = 1  # now <= this (with prior activity) -> GONE
 
+# Trend horizons (seconds) shown alongside the current interval. A trend over a
+# horizon compares the recent half of that window of history against the older
+# half. Tune the set here.
+TREND_HORIZONS = [("10m", 600), ("30m", 1800), ("60m", 3600)]
+MAX_HORIZON_SECS = max(secs for _label, secs in TREND_HORIZONS)
+# How many recent windows the "now"/recommendation trend looks at (keeps the
+# immediate signal responsive even though we retain an hour of history).
+SHORT_TREND_WINDOWS = 5
+
 # Trend labels
 RISING, STEADY, FADING, NEW, GONE = "RISING", "STEADY", "FADING", "NEW", "GONE"
 
@@ -149,7 +158,12 @@ class SpotProcessor:
         self.window_secs = window_secs
         self.min_snr = min_snr
         self._buffer: list[Spot] = []
-        self.history: deque[WindowSummary] = deque(maxlen=max(1, history))
+        # Retain enough completed windows to cover the longest trend horizon
+        # (an hour) regardless of the requested short-trend depth.
+        retain = max(history, windows_for_secs(MAX_HORIZON_SECS, window_secs)) + 1
+        self.history: deque[WindowSummary] = deque(maxlen=max(1, retain))
+        # Windows used for the responsive "now" / recommendation trend.
+        self.short_trend_windows = max(2, history)
 
     def add(self, spot: Spot) -> None:
         if self.min_snr is not None and spot.snr_db < self.min_snr:
@@ -159,22 +173,12 @@ class SpotProcessor:
     def pending(self) -> int:
         return len(self._buffer)
 
-    def roll(self, now: float) -> WindowSummary:
-        """Build a :class:`WindowSummary` from spots received in the last window.
-
-        The window is keyed off *receive time*, not the Zulu field. Older spots
-        are discarded; the summary is appended to history and returned.
-        """
-        start = now - self.window_secs
-        in_window = [s for s in self._buffer if start < s.recv_time <= now]
-        # Retain spots that belong to a future window (can happen during
-        # replay); drop everything at or before this window's end.
-        self._buffer = [s for s in self._buffer if s.recv_time > now]
-
-        summary = WindowSummary(
-            start_time=start, end_time=now, mycall=self.mycall
-        )
-        for s in in_window:
+    def _build_summary(self, start: float, now: float,
+                       spots: list[Spot]) -> WindowSummary:
+        summary = WindowSummary(start_time=start, end_time=now, mycall=self.mycall)
+        for s in spots:
+            if not (start < s.recv_time <= now):
+                continue
             summary.total_spots += 1
             if s.is_uk:
                 summary.total_uk_spots += 1
@@ -183,7 +187,40 @@ class SpotProcessor:
             if same_station(s.spotted, self.mycall):
                 mkey = (s.band, s.spotter_continent)
                 summary.mm.setdefault(mkey, MmObservation()).add(s)
+        return summary
 
+    def roll(self, now: float) -> WindowSummary:
+        """Build a discrete window summary, append to history, advance the buffer.
+
+        The window is keyed off *receive time*, not the Zulu field. Spots at or
+        before ``now`` are consumed; future spots (possible during replay) are
+        kept. Used by the classic line-report path.
+        """
+        start = now - self.window_secs
+        summary = self._build_summary(start, now, self._buffer)
+        self._buffer = [s for s in self._buffer if s.recv_time > now]
+        self.history.append(summary)
+        return summary
+
+    def prune(self, now: float) -> None:
+        """Drop spots older than the current rolling window (bounds the buffer)."""
+        cutoff = now - self.window_secs
+        self._buffer = [s for s in self._buffer if s.recv_time > cutoff]
+
+    def snapshot(self, now: float) -> WindowSummary:
+        """Build a summary of the *current rolling window* without mutating state.
+
+        Used by the live TUI to redraw continuously between window commits.
+        """
+        return self._build_summary(now - self.window_secs, now, self._buffer)
+
+    def commit(self, now: float) -> WindowSummary:
+        """Snapshot the current rolling window into history (for trends/CSV).
+
+        Does not clear the buffer; :meth:`prune` bounds it by age so successive
+        commits one window apart are effectively non-overlapping.
+        """
+        summary = self.snapshot(now)
         self.history.append(summary)
         return summary
 
@@ -233,6 +270,47 @@ def classify_trend(series: list[int]) -> str:
     if cur <= prev * FADE_FACTOR:
         return FADING
     return STEADY
+
+
+def _mean(xs: list[int]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
+def classify_horizon(series: list[int], n_windows: int) -> str:
+    """Classify the trajectory over the last ``n_windows`` windows.
+
+    Unlike :func:`classify_trend` (which keys off the immediate window-to-window
+    step), this compares the *recent half* of the horizon against the *older
+    half* -- so it captures the longer-run direction over 10/30/60 minutes.
+    """
+    if not series:
+        return STEADY
+    seg = series[-n_windows:] if n_windows < len(series) else list(series)
+    if len(seg) < 2:
+        cur = seg[-1] if seg else 0
+        return NEW if cur >= MEANINGFUL_SPOTTERS else STEADY
+    mid = len(seg) // 2
+    older = seg[:mid] if mid > 0 else seg[:1]
+    newer = seg[mid:]
+    om, nm = _mean(older), _mean(newer)
+
+    if om <= NEAR_ZERO_SPOTTERS and nm >= MEANINGFUL_SPOTTERS:
+        return NEW
+    if om >= MEANINGFUL_SPOTTERS and nm <= GONE_FLOOR:
+        return GONE
+    if om <= 0:
+        return RISING if nm >= MEANINGFUL_SPOTTERS else STEADY
+    ratio = nm / om
+    if ratio >= RISE_FACTOR:
+        return RISING
+    if ratio <= FADE_FACTOR:
+        return FADING
+    return STEADY
+
+
+def windows_for_secs(secs: int, window_secs: int) -> int:
+    """Number of windows spanning ``secs`` seconds (at least 2)."""
+    return max(2, round(secs / window_secs)) if window_secs > 0 else 2
 
 
 def band_spotter_series(history: list[WindowSummary], band: str) -> list[int]:

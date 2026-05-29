@@ -58,16 +58,19 @@ class TestBands(unittest.TestCase):
     def test_mapping(self):
         self.assertEqual(band_for(1810), "160m")
         self.assertEqual(band_for(3573), "80m")
-        self.assertEqual(band_for(5357), "60m")
         self.assertEqual(band_for(7040), "40m")
-        self.assertEqual(band_for(10136), "30m")
         self.assertEqual(band_for(14036), "20m")
-        self.assertEqual(band_for(18100), "17m")
         self.assertEqual(band_for(21025), "15m")
-        self.assertEqual(band_for(24905), "12m")
         self.assertEqual(band_for(28020), "10m")
-        self.assertEqual(band_for(50100), "6m")
         self.assertEqual(band_for(12345), "?")
+
+    def test_non_hf_contest_bands_excluded(self):
+        # WARC (30/17/12m), 60m and 6m are not HF contest bands -> unknown.
+        self.assertEqual(band_for(5357), "?")   # 60m
+        self.assertEqual(band_for(10136), "?")  # 30m
+        self.assertEqual(band_for(18100), "?")  # 17m
+        self.assertEqual(band_for(24905), "?")  # 12m
+        self.assertEqual(band_for(50100), "?")  # 6m
 
 
 class TestContinents(unittest.TestCase):
