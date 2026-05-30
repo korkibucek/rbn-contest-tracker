@@ -71,6 +71,11 @@ venv's Python against `python -m rbn_tracker`.
 | `--window SECONDS` | `60` | Base sampling/commit window (the "current interval") |
 | `--avg-window MINUTES` | `15` | Averaging window for the band matrix, recommendation and your-station sections — magnitudes are totals over this span |
 | `--category CAT` | `single` | Contest category for run/band-change tracking: `single`, `m2` (multi-two), `mm` (multi-multi) |
+| `--opponents MODE` | `auto` | Opponents leaderboard source: `auto` (contestonlinescore.com), `manual`, `off` |
+| `--opponents-file FILE` | – | Competitor list for `manual` mode |
+| `--score-url URL` | – | Override the live-score JSON endpoint for `auto` |
+| `--contest ID` | – | Contest id for the `auto` live-score source |
+| `--opponents-window N` | `5` | Show ±N stations around you |
 | `--history N` | `5` | Minimum windows of history retained (an hour is always kept regardless, for the 60 min horizon) |
 | `--csv FILE` | – | Append per-window, per-cell stats to a CSV |
 | `--min-snr DB` | – | Ignore spots weaker than this |
@@ -132,6 +137,42 @@ Categories (by number of simultaneously transmitted run signals):
 | `m2` | Multi-Two — two transmitters at once | Shows `running N/2 transmitters`; if a transmitter is idle while a DX band is open, says to put a radio there; notes the CQ WW 8 band-changes/hour/TX limit |
 | `mm` | Multi-Multi — one signal per band (up to 6 on HF) | Flags open DX bands you aren't running so you can fill them |
 
+## Opponents leaderboard
+
+Shows the **±5 stations around you in your category**, with how close you are on
+**QSOs, Mults and Score**, plus each rival's **current run frequency** —
+cross-referenced from the live RBN stream (RBN spots stations calling CQ, so if a
+rival is running we see exactly where; a rival doing S&P isn't spotted and shows
+`(no CQ)`).
+
+```
+OPPONENTS (±5, Single / Multi-Single) -- manual (opponents.txt)
+  call          QSOs  Mults        Score   vs you             run
+  GM4DEF       1,500    420    1,300,000   +100Q +15M +120.0k 7033.3 40m
+> MM1E (you)   1,400    405    1,180,000   --                 7032.0 40m
+  GW4ZZZ       1,380    400    1,120,000   -20Q -5M -60.0k    14037.1 20m
+```
+
+Two sources (`--opponents`):
+
+- **`auto`** (default) — pulls the live scoreboard for your category from
+  **contestonlinescore.com**; your own totals come from the scoreboard too. Set
+  the contest with `--contest ID`, or point at a specific feed with
+  `--score-url URL`. On any failure it degrades gracefully and the panel says so.
+- **`manual`** — `--opponents-file FILE`, one competitor per line:
+  `callsign[, qsos, mults, score]` (`#` comments allowed). Include your own call
+  with your score so the list can rank around you. Run frequencies still come
+  from RBN.
+- **`off`** — hide the panel.
+
+`--opponents-window N` controls how many stations to show either side of you
+(default 5).
+
+> Note: the auto adapter targets contestonlinescore.com, but the exact
+> contest/endpoint must be reachable from where you run it; the parsing,
+> leaderboard and run-frequency logic are verified, but you may need
+> `--score-url`/`--contest` for your specific contest.
+
 ## Trends
 
 Trends are computed on the **distinct-spotter** series for a band (less noisy
@@ -156,6 +197,7 @@ constants at the top of [`rbn_tracker/processing.py`](rbn_tracker/processing.py)
 | `rbn_tracker/processing.py` | Windowing, aggregation, trend logic |
 | `rbn_tracker/analysis.py` | Recommendation/scoring + horizon trends (shared) |
 | `rbn_tracker/runstate.py` | Run / band-change detection + contest categories |
+| `rbn_tracker/opponents.py` | Opponents leaderboard (auto/manual) + run-freq lookup |
 | `rbn_tracker/report.py` | Classic text report rendering |
 | `rbn_tracker/tui.py` | Full-screen interactive viewer (curses) |
 | `rbn_tracker/feed.py` | Telnet feed (reconnect/backoff) + replay |
