@@ -6,12 +6,18 @@ can never drift apart in how they rank bands or pick the QSY suggestion.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from .bands import band_sort_key
 from .processing import (
+    COVERAGE_BOOST_CAP,
+    COVERAGE_REF_SKIMMERS,
     DX_CONTINENTS,
     FADING,
     GONE,
     NEW,
+    REACH_CONF_K,
+    REACH_EWMA_ALPHA,
     RISING,
     STEADY,
     TREND_HORIZONS,
@@ -110,74 +116,168 @@ def aggregate_windows(summary: WindowSummary, history: list[WindowSummary],
             o.snrs += obs.snrs
             o.speeds += obs.speeds
             o.freqs += obs.freqs
+        for cont, sk in w.skimmers.items():
+            view.skimmers.setdefault(cont, set()).update(sk)
     return view
 
 
-def _band_dx_stats(view: WindowSummary, band: str) -> tuple[int, int]:
-    """(distinct DX spotters, DX spot count) for a band in the aggregated view."""
-    spotters: set[str] = set()
-    count = 0
+# --- reach-fraction metrics (activity normalisation) -----------------------
+
+def _ewma(series: list[float], alpha: float) -> float | None:
+    if not series:
+        return None
+    s = series[0]
+    for x in series[1:]:
+        s = alpha * x + (1.0 - alpha) * s
+    return s
+
+
+def per_window_reach(history: list[WindowSummary], band: str,
+                     cont: str) -> list[float]:
+    """Per-window reach fraction (UK heard in cont / UK active on band).
+
+    Only windows where the band had UK activity contribute (so dead windows
+    don't drag the smoothed value, and we never divide by zero).
+    """
+    out: list[float] = []
+    for w in history:
+        denom = w.band_active_uk(band)
+        if denom <= 0:
+            continue
+        cell = w.cell(band, cont)
+        num = cell.distinct_uk if cell else 0
+        out.append(num / denom)
+    return out
+
+
+def smoothed_reach(history: list[WindowSummary], band: str, cont: str,
+                   alpha: float = REACH_EWMA_ALPHA) -> float:
+    """EWMA-smoothed reach fraction over the window history (0..1)."""
+    return _ewma(per_window_reach(history, band, cont), alpha) or 0.0
+
+
+def activity_confidence(view: WindowSummary, band: str) -> float:
+    """Confidence (0..1) in a band's reach numbers from the active-UK sample."""
+    n = view.band_active_uk(band)
+    return n / (n + REACH_CONF_K) if n > 0 else 0.0
+
+
+def coverage_factor(view: WindowSummary, cont: str) -> float:
+    """Boost (1..CAP) for continents with thin skimmer coverage.
+
+    A detection where few skimmers are listening means more than the same
+    detection where hundreds are. Dense continents get factor 1.0 (no change).
+    """
+    sk = view.skimmer_count(cont)
+    if sk <= 0:
+        return 1.0
+    return min(COVERAGE_BOOST_CAP, max(1.0, COVERAGE_REF_SKIMMERS / sk))
+
+
+@dataclass
+class ContRec:
+    band: str
+    reach: float          # smoothed reach fraction 0..1
+    active_uk: int        # active-UK population on the band (denominator)
+    count: int            # raw spot count in this cell (avg-window total)
+    spotters: int         # distinct skimmers in this cell
+    median_snr: float | None
+    coverage: int         # active skimmers in the continent
+    trend: str
+
+
+@dataclass
+class BandRec:
+    band: str
+    score: float
+    trend: str
+    active_uk: int
+    dx_signal: float      # coverage-weighted sum of reach across DX continents
+    best_cont: str | None
+    best_reach: float
+
+
+def _band_reach_signal(view: WindowSummary, history: list[WindowSummary],
+                       band: str, alpha: float):
+    """(dx_signal, best_cont, best_reach) for a band's DX reach."""
+    dx_signal = 0.0
+    best_cont, best_reach = None, 0.0
     for cont in DX_CONTINENTS:
-        cell = view.cell(band, cont)
-        if cell:
-            spotters |= cell.spotters
-            count += cell.count
-    return len(spotters), count
+        sr = smoothed_reach(history, band, cont, alpha)
+        if sr <= 0:
+            continue
+        dx_signal += sr * coverage_factor(view, cont)
+        if sr > best_reach:
+            best_reach, best_cont = sr, cont
+    return dx_signal, best_cont, best_reach
 
 
 def score_bands(view: WindowSummary, history: list[WindowSummary],
-                avg_windows: int):
-    """DX-scored bands, best first, over the aggregated view.
+                avg_windows: int, alpha: float = REACH_EWMA_ALPHA):
+    """DX-scored bands, best first, ranked by activity-normalised reach.
 
-    Each entry: ``(score, band, dx_spotters, dx_count, trend)`` where the counts
-    are totals over the averaging window and ``trend`` is the band's trajectory
-    over the same span.
+    Score = coverage-weighted DX reach x activity-confidence x trend-weight, so a
+    quiet-but-propagating band can outrank a busy-but-poorly-propagating one.
+    Returns a list of :class:`BandRec`.
     """
-    scored = []
+    scored: list[BandRec] = []
     for band in view.active_bands():
-        dx_spotters, dx_count = _band_dx_stats(view, band)
-        if dx_spotters == 0 and dx_count == 0:
+        dx_signal, best_cont, best_reach = _band_reach_signal(
+            view, history, band, alpha)
+        if dx_signal <= 0:
             continue
         trend = classify_horizon(band_spotter_series(history, band), avg_windows)
-        score = (dx_spotters + 0.1 * dx_count) * TREND_WEIGHT.get(trend, 1.0)
-        scored.append((score, band, dx_spotters, dx_count, trend))
-    scored.sort(reverse=True)
+        conf = activity_confidence(view, band)
+        score = dx_signal * conf * TREND_WEIGHT.get(trend, 1.0)
+        scored.append(BandRec(band, score, trend, view.band_active_uk(band),
+                              dx_signal, best_cont, best_reach))
+    scored.sort(key=lambda r: r.score, reverse=True)
     return scored
 
 
 def best_band_per_continent(view: WindowSummary,
-                            history: list[WindowSummary], avg_windows: int):
-    """Map each DX continent -> ``(band, cell, trend)`` or ``None`` if closed."""
-    result: dict[str, tuple | None] = {}
+                            history: list[WindowSummary], avg_windows: int,
+                            alpha: float = REACH_EWMA_ALPHA):
+    """Map each DX continent -> best :class:`ContRec`, or ``None`` if closed."""
+    result: dict[str, ContRec | None] = {}
     for cont in DX_CONTINENTS:
-        best = None  # (weighted_value, band, cell, trend)
+        best = None  # (weighted_value, ContRec)
         for band in view.active_bands():
             cell = view.cell(band, cont)
             if not cell or cell.count == 0:
                 continue
+            sr = smoothed_reach(history, band, cont, alpha)
             trend = classify_horizon(band_spotter_series(history, band),
                                      avg_windows)
-            val = cell.distinct_spotters * TREND_WEIGHT.get(trend, 1.0)
+            conf = activity_confidence(view, band)
+            val = sr * coverage_factor(view, cont) * conf * \
+                TREND_WEIGHT.get(trend, 1.0)
+            rec = ContRec(band, sr, view.band_active_uk(band), cell.count,
+                          cell.distinct_spotters, cell.median_snr,
+                          view.skimmer_count(cont), trend)
             if best is None or val > best[0]:
-                best = (val, band, cell, trend)
-        result[cont] = None if best is None else (best[1], best[2], best[3])
+                best = (val, rec)
+        result[cont] = None if best is None else best[1]
     return result
 
 
 def recommended_dx_band(view: WindowSummary, history: list[WindowSummary],
-                        avg_windows: int) -> tuple[str, str, int] | None:
-    """(band, continent, spotters) of the single best DX opportunity."""
+                        avg_windows: int,
+                        alpha: float = REACH_EWMA_ALPHA) -> tuple[str, str, int] | None:
+    """(band, continent, reach_pct_int) of the single best DX opportunity."""
     best = None
     for band in view.active_bands():
         trend = classify_horizon(band_spotter_series(history, band), avg_windows)
         wgt = TREND_WEIGHT.get(trend, 1.0)
+        conf = activity_confidence(view, band)
         for cont in DX_CONTINENTS:
             cell = view.cell(band, cont)
             if not cell or cell.count == 0:
                 continue
-            val = cell.distinct_spotters * wgt
+            sr = smoothed_reach(history, band, cont, alpha)
+            val = sr * coverage_factor(view, cont) * conf * wgt
             if best is None or val > best[0]:
-                best = (val, band, cont, cell.distinct_spotters)
+                best = (val, band, cont, round(sr * 100))
     if best is None:
         return None
     return best[1], best[2], best[3]

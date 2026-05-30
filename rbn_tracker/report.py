@@ -172,36 +172,38 @@ def _render_trends(view: WindowSummary, history: list[WindowSummary],
 def _render_recommendation(view: WindowSummary,
                            history: list[WindowSummary],
                            cfg: RenderConfig) -> list[str]:
-    lines = ["", f"BAND RECOMMENDATION (working DX into non-EU, last "
+    lines = ["", f"BAND RECOMMENDATION (working DX into non-EU, reach over last "
              f"{cfg.avg_label})", ""]
 
     scored = score_bands(view, history, cfg.avg_windows)
     if not scored:
-        lines.append(f"  No DX (non-EU) activity from UK/IE in the last "
+        lines.append(f"  No DX (non-EU) reach from UK/IE in the last "
                      f"{cfg.avg_label}.")
         lines.append("  Either EU-only conditions, or thin skimmer coverage "
                      "into DX -- watch the trends.")
         return lines
 
     top = scored[0]
+    best_c = top.best_cont or "DX"
     lines.append(
-        f"  TOP DX BAND: {top[1]}  "
-        f"({top[2]} distinct DX spotters, {top[3]} spots, {top[4]})"
+        f"  TOP DX BAND: {top.band}  "
+        f"(best reach {best_c} {top.best_reach*100:.0f}% of {top.active_uk} "
+        f"active UK, {top.trend})"
     )
 
-    # Best band per open DX continent.
+    # Best band per open DX continent (reach% = fraction of active UK stations
+    # on that band reaching the continent; cov = skimmers listening there).
     lines.append("")
     lines.append("  Best band per continent:")
     for cont, best in best_band_per_continent(view, history, cfg.avg_windows).items():
         if best is None:
             lines.append(f"    {cont}: closed (no UK/IE spots heard there)")
             continue
-        band, cell, trend = best
         lines.append(
-            f"    {cont}: {band}  "
-            f"{cell.count} spots / {cell.distinct_spotters} spotters / "
-            f"med {_fmt_snr(cell.median_snr)} / "
-            f"{arrow(trend, cfg.use_unicode)} {trend}"
+            f"    {cont}: {best.band}  {best.reach*100:.0f}% reach "
+            f"(of {best.active_uk} active) / {best.count} sp / "
+            f"med {_fmt_snr(best.median_snr)} / cov~{best.coverage} / "
+            f"{arrow(best.trend, cfg.use_unicode)} {best.trend}"
         )
     return lines
 
@@ -246,7 +248,7 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
     me = cfg.mycall
     lines = ["", f"YOUR STATION -- {me} (getting out, last {cfg.avg_label})", ""]
 
-    open_dx_bands = [s[1] for s in score_bands(view, history, cfg.avg_windows)]
+    open_dx_bands = [r.band for r in score_bands(view, history, cfg.avg_windows)]
     lines += _render_run_status(run_status, open_dx_bands, cfg)
     lines.append("")
 
@@ -344,10 +346,10 @@ def _render_footer() -> list[str]:
     return [
         "",
         "-" * 78,
-        " NOTE: RBN skimmer coverage is dense in NA/EU, sparse in AF/SA/OC.",
-        " Low counts into those regions may reflect thin coverage, not a dead",
-        " band -- lean on TRENDS and distinct-spotter counts, not absolute"
-        " numbers.",
+        " NOTE: the recommendation ranks by REACH (fraction of active UK stns on",
+        " a band reaching each continent), so a band reading isn't driven by how",
+        " busy it is. Thin AF/SA/OC skimmer coverage is compensated (cov~N), but",
+        " absolute counts there are still small -- lean on reach and trends.",
         "-" * 78,
     ]
 

@@ -32,6 +32,17 @@ GONE_FLOOR = 1  # now <= this (with prior activity) -> GONE
 TREND_HORIZONS = [("10min", 600), ("30min", 1800), ("60min", 3600)]
 MAX_HORIZON_SECS = max(secs for _label, secs in TREND_HORIZONS)
 
+# --- Reach / activity-normalisation thresholds (tune here) ----------------
+# We measure *reach fraction* -- of the UK stations active (heard anywhere) on a
+# band, what fraction are reaching a given continent -- so a band reading isn't
+# dominated by how busy the band happens to be with UK stations.
+REACH_CONF_K = 5      # active-UK half-saturation for confidence: conf=n/(n+K)
+REACH_EWMA_ALPHA = 0.4  # exponential smoothing of per-window reach (0..1)
+# Coverage adjustment: continents with fewer than REF active skimmers get their
+# reach signal boosted (a detection where few are listening means more), capped.
+COVERAGE_REF_SKIMMERS = 50
+COVERAGE_BOOST_CAP = 3.0
+
 # Trend labels
 RISING, STEADY, FADING, NEW, GONE = "RISING", "STEADY", "FADING", "NEW", "GONE"
 
@@ -118,6 +129,9 @@ class WindowSummary:
     cells: dict[tuple[str, str], CellStats] = field(default_factory=dict)
     # me-station observations keyed by (band, continent)
     mm: dict[tuple[str, str], MmObservation] = field(default_factory=dict)
+    # active-skimmer census per continent, from ALL spots (UK or not) -- used to
+    # gauge how much listening coverage each continent has.
+    skimmers: dict[str, set[str]] = field(default_factory=dict)
 
     def cell(self, band: str, cont: str) -> CellStats | None:
         return self.cells.get((band, cont))
@@ -136,6 +150,17 @@ class WindowSummary:
 
     def band_count(self, band: str) -> int:
         return sum(c.count for (b, _c), c in self.cells.items() if b == band)
+
+    def band_active_uk(self, band: str) -> int:
+        """Distinct UK stations heard *anywhere* on this band (reach denominator)."""
+        s: set[str] = set()
+        for (b, _c), cell in self.cells.items():
+            if b == band:
+                s |= cell.uk_stations
+        return len(s)
+
+    def skimmer_count(self, cont: str) -> int:
+        return len(self.skimmers.get(cont, ()))
 
     # --- me-station rollups ---
     def mm_bands(self) -> list[str]:
@@ -195,6 +220,9 @@ class SpotProcessor:
             if not (start < s.recv_time <= now):
                 continue
             summary.total_spots += 1
+            # Skimmer census: every spot means this skimmer is listening in its
+            # continent, regardless of who it heard.
+            summary.skimmers.setdefault(s.spotter_continent, set()).add(s.spotter)
             if s.is_uk:
                 summary.total_uk_spots += 1
                 key = (s.band, s.spotter_continent)

@@ -102,11 +102,11 @@ jump around on a single noisy 60 s window; the trend arrows show the direction.
    over the last 15 min**, with the current-interval trend arrow per band.
 3. **Band trends** — for each band, a sparkline and the trend at four horizons:
    the **current interval, 10 min, 30 min and 60 min**.
-4. **Band recommendation** — bands ranked for working DX (activity into non-EU
-   continents over the last 15 min), **trend-weighted** so a *rising* band
-   outranks a higher-count but *fading* one. Top overall band, best band per
-   open continent (with a one-line justification), and which continents look
-   closed.
+4. **Band recommendation** — bands ranked for working DX by **reach fraction**
+   into non-EU continents (see *Reach* below), confidence- and coverage-weighted
+   and **trend-weighted** so a *rising* opener outranks a busy-but-fading band.
+   Top overall band, best band per open continent (reach%, active UK, coverage),
+   and which continents look closed.
 5. **Your station (MM1E)** — a **RUN** block (which bands you're running CQ on,
    band-change/S&P detection, category checks — see below), then bands you were
    spotted on over the last 15 min, distinct spotters per band, continents
@@ -180,6 +180,38 @@ Sources (`--opponents`):
 > contest/endpoint must be reachable from where you run it; the parsing,
 > leaderboard and run-frequency logic are verified, but you may need
 > `--score-url`/`--contest` for your specific contest.
+
+## Reach, not raw counts (activity normalisation)
+
+UK spots are a *probe* for propagation, but a raw count conflates three things:
+how many UK stations happen to be calling CQ on a band, how well it propagates,
+and how many skimmers are listening. The first swings wildly and has nothing to
+do with propagation, so the recommendation ranks bands by **reach fraction**
+instead:
+
+> **reach%(band → continent) = distinct UK stations heard in that continent ÷
+> distinct UK stations active on that band** (heard anywhere — in practice the
+> dense EU skimmers catch almost every audible UK CW signal).
+
+So *"15m: 75% reach of 4 active"* means three of the four UK stations on 15m are
+making it into that continent — a clean propagation signal that doesn't care how
+busy the band is. A quiet-but-open band can outrank a busy-but-closed one.
+
+Three refinements keep it honest:
+
+- **Confidence** — reach from a tiny active population is noisy, so the score is
+  weighted by `n/(n+k)` (more active UK stations → more trustworthy).
+- **EWMA smoothing** — reach is exponentially smoothed across windows so the
+  headline doesn't jitter window-to-window.
+- **Coverage** — a live per-continent **skimmer census** (`cov~N`) compensates
+  thin AF/SA/OC coverage: a detection where few are listening counts for more
+  (bounded boost), so sparse regions aren't unfairly buried.
+
+All of these are constants at the top of
+[`rbn_tracker/processing.py`](rbn_tracker/processing.py)
+(`REACH_CONF_K`, `REACH_EWMA_ALPHA`, `COVERAGE_REF_SKIMMERS`,
+`COVERAGE_BOOST_CAP`). The band×continent matrix still shows raw counts; the CSV
+gains `reach_pct`, `active_uk` and `coverage` columns.
 
 ## Trends
 

@@ -164,28 +164,30 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
 
     # --- recommendation ---
     frame.append([("RECOMMENDATION  ", "hdr"),
-                  (f"work DX (non-EU) {sep} last {span}", "dim")])
+                  (f"DX reach (non-EU) {sep} last {span}", "dim")])
     scored = score_bands(view, history, cfg.avg_windows)
     if not scored:
-        frame.append([(f"  No DX activity in the last {span} {sep} EU-only or "
+        frame.append([(f"  No DX reach in the last {span} {sep} EU-only or "
                        "thin coverage; watch the trends.", "dim")])
     else:
         top = scored[0]
-        frame.append([("  TOP DX BAND: ", "normal"), (top[1], "good"),
-                      (f"  {top[2]} spotters / {top[3]} spots  ", "normal"),
-                      (top[4], _trend_style(top[4]))])
+        bc = top.best_cont or "DX"
+        frame.append([("  TOP DX BAND: ", "normal"), (top.band, "good"),
+                      (f"  best reach {bc} {top.best_reach*100:.0f}% of "
+                       f"{top.active_uk} active  ", "normal"),
+                      (top.trend, _trend_style(top.trend))])
         for cont, best in best_band_per_continent(view, history,
                                                   cfg.avg_windows).items():
             if best is None:
                 frame.append([(f"    {cont}: ", "dim"), ("closed", "fading")])
                 continue
-            band, cell, trend = best
             frame.append([
-                (f"    {cont}: ", "dim"), (band, "accent"),
-                (f"  {cell.count} sp / {cell.distinct_spotters} spotters / "
-                 f"med {_fmt_snr(cell.median_snr)}  ", "normal"),
-                (arrow(trend, uc), _trend_style(trend)),
-                (f" {trend}", _trend_style(trend)),
+                (f"    {cont}: ", "dim"), (best.band, "accent"),
+                (f"  {best.reach*100:.0f}% reach of {best.active_uk}  ", "good"),
+                (f"{best.count}sp med {_fmt_snr(best.median_snr)} "
+                 f"cov~{best.coverage}  ", "normal"),
+                (arrow(best.trend, uc), _trend_style(best.trend)),
+                (f" {best.trend}", _trend_style(best.trend)),
             ])
 
     frame.append([("", "normal")])
@@ -198,7 +200,7 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     # Run / category status (band-change & S&P detection).
     run_status = compute_run_status(summary, history, cfg.window_secs,
                                     cfg.category_key)
-    open_dx_bands = [s[1] for s in scored] if scored else []
+    open_dx_bands = [r.band for r in scored] if scored else []
     arrow_to = "→" if uc else "->"
     run_line: Line = [(f"  RUN [{run_status.category_name}, "
                        f"{run_status.max_tx} TX]: ", "hdr"),
