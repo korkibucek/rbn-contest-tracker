@@ -13,7 +13,17 @@ from .csvout import CsvWriter
 from .feed import ReplayFeed, TelnetFeed
 from .processing import SpotProcessor
 from .report import RenderConfig, format_report
+from .runstate import normalize_category
 from .spots import SpotParseError, parse_spot
+
+
+def _category(text: str) -> str:
+    """argparse type: normalise a contest-category string (or error out)."""
+    import argparse
+    try:
+        return normalize_category(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 log = logging.getLogger("rbn")
 
@@ -39,6 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--avg-window", type=float, default=15.0, metavar="MINUTES",
                    help="averaging window (minutes) for the band matrix, "
                         "recommendation and your-station sections (default 15)")
+    p.add_argument("--category", type=_category, default="single",
+                   metavar="CAT",
+                   help="contest category for run/band-change tracking: "
+                        "single (default), m2 (multi-two), mm (multi-multi)")
     p.add_argument("--history", type=int, default=5, metavar="N",
                    help="number of windows kept for trend analysis (default 5)")
     p.add_argument("--csv", metavar="FILE", help="append per-window stats to CSV")
@@ -258,6 +272,7 @@ def main(argv: list[str] | None = None) -> int:
         use_unicode=(not args.ascii) and _supports_unicode(),
         window_secs=args.window,
         avg_window_secs=int(round(args.avg_window * 60)),
+        category_key=args.category,
     )
     csv_writer = CsvWriter(args.csv) if args.csv else None
 

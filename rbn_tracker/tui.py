@@ -16,7 +16,6 @@ from .analysis import (
     band_horizon_trends,
     best_band_per_continent,
     display_bands,
-    mm_current_band,
     mm_horizon_trends,
     recommended_dx_band,
     score_bands,
@@ -33,6 +32,7 @@ from .processing import (
     mm_band_series,
 )
 from .report import RenderConfig, arrow, sparkline
+from .runstate import compute_run_status, idle_tx_suggestion
 
 Segment = tuple[str, str]
 Line = list[Segment]
@@ -194,6 +194,39 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     dash = "—" if uc else "-"
     frame.append([(f"YOUR STATION {dash} {cfg.mycall}  ", "hdr"),
                   (f"(getting out {sep} last {span})", "dim")])
+
+    # Run / category status (band-change & S&P detection).
+    run_status = compute_run_status(summary, history, cfg.window_secs,
+                                    cfg.category_key)
+    open_dx_bands = [s[1] for s in scored] if scored else []
+    arrow_to = "→" if uc else "->"
+    frame.append([(f"  RUN [{run_status.category_name}, "
+                   f"{run_status.max_tx} TX]: ", "hdr"),
+                  ("running CQ on ", "dim"),
+                  (", ".join(run_status.running_bands) or "nothing",
+                   "good" if run_status.running_bands else "warn")])
+    if run_status.max_tx == 1 and run_status.running_count > 1:
+        frame.append([(f"    running {run_status.running_count} bands at once "
+                       "(single TX) — band change in progress?", "warn")])
+    for frm, to in run_status.qsy:
+        frame.append([("    band change: ", "accent"),
+                      (f"{frm} {arrow_to} {to}", "new"), (" (run moved)", "dim")])
+    for band, mins in run_status.sp_or_off:
+        frame.append([(f"    {band}: ", "accent"),
+                      (f"no CQ for ~{mins}m {sep} gone S&P or off this band",
+                       "fading")])
+    if run_status.max_tx >= 2:
+        frame.append([(f"    running {run_status.running_count}/"
+                       f"{run_status.max_tx} transmitters", "dim")])
+        idle = idle_tx_suggestion(run_status, open_dx_bands)
+        if idle:
+            frame.append([(f"    {'»' if uc else '>>'} {idle}", "warn")])
+        if run_status.category_key == "m2" and run_status.band_changes_last_hour:
+            frame.append([(f"    band changes last hr: "
+                           f"{run_status.band_changes_last_hour} "
+                           "(M/2 limit 8/hr per TX)", "dim")])
+    frame.append([("", "normal")])
+
     if not view.mm_spotted:
         frame.append([(f"  {cfg.mycall} not spotted in the last {span} {sep} "
                        "check you're calling CQ / band may be dead where you "
@@ -223,11 +256,12 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
                      f"{speed_s}", "normal"),
                 ])
         rec = recommended_dx_band(view, history, cfg.avg_windows)
-        current = mm_current_band(view)
-        if rec and current and rec[0] != current:
+        if rec and len(run_status.running_bands) == 1 \
+                and rec[0] != run_status.running_bands[0]:
+            cur = run_status.running_bands[0]
             frame.append([
                 (f"  {'»' if uc else '>>'} QSY: ", "warn"),
-                (f"you're strongest on {current}, but {rec[0]} is the band into "
+                (f"you're running {cur}, but {rec[0]} is the band into "
                  f"{rec[1]} ({rec[2]} spotters). Consider a move.", "normal"),
             ])
 

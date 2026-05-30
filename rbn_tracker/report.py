@@ -18,7 +18,6 @@ from .analysis import (
     best_band_per_continent,
     display_bands,
     minutes_label,
-    mm_current_band,
     mm_horizon_trends,
     recommended_dx_band,
     score_bands,
@@ -35,6 +34,7 @@ from .processing import (
     mm_band_series,
     windows_for_secs,
 )
+from .runstate import RunStatus, compute_run_status, idle_tx_suggestion
 
 _SPARK_UNICODE = "▁▂▃▄▅▆▇█"
 _SPARK_ASCII = "_.-=+*#@"
@@ -50,6 +50,7 @@ class RenderConfig:
     use_unicode: bool = True
     window_secs: int = 60
     avg_window_secs: int = DEFAULT_AVG_WINDOW_SECS  # matrix/rec/your-station view
+    category_key: str = "single"  # single | m2 | mm
 
     @property
     def avg_windows(self) -> int:
@@ -205,10 +206,44 @@ def _render_recommendation(view: WindowSummary,
     return lines
 
 
+def _render_run_status(status: RunStatus, open_dx_bands: list[str],
+                       cfg: RenderConfig) -> list[str]:
+    me = cfg.mycall
+    lines = [f"  RUN [{status.category_name}, {status.max_tx} TX]:"]
+    if status.running_bands:
+        lines.append(f"    running CQ on: {', '.join(status.running_bands)}")
+    else:
+        lines.append("    no CQ run detected -- S&P, between bands, or off air")
+    # Single-op sanity: shouldn't be running two bands at once.
+    if status.max_tx == 1 and status.running_count > 1:
+        lines.append(f"    running {status.running_count} bands at once "
+                     "(single TX) -- band change in progress?")
+    for frm, to in status.qsy:
+        lines.append(f"    band change: {frm} -> {to} (run moved)")
+    for band, mins in status.sp_or_off:
+        lines.append(f"    {band}: no CQ for ~{mins}m -- gone S&P or off this band")
+    if status.max_tx >= 2:
+        lines.append(f"    running {status.running_count}/{status.max_tx} "
+                     "transmitters")
+        idle = idle_tx_suggestion(status, open_dx_bands)
+        if idle:
+            lines.append(f"    >> {idle}")
+        if status.category_key == "m2" and \
+                status.band_changes_last_hour > 0:
+            lines.append(f"    band changes last hr: "
+                         f"{status.band_changes_last_hour} "
+                         "(M/2 limit 8/hr per TX)")
+    return lines
+
+
 def _render_mm(view: WindowSummary, history: list[WindowSummary],
-               cfg: RenderConfig) -> list[str]:
+               cfg: RenderConfig, run_status: RunStatus) -> list[str]:
     me = cfg.mycall
     lines = ["", f"YOUR STATION -- {me} (getting out, last {cfg.avg_label})", ""]
+
+    open_dx_bands = [s[1] for s in score_bands(view, history, cfg.avg_windows)]
+    lines += _render_run_status(run_status, open_dx_bands, cfg)
+    lines.append("")
 
     if not view.mm_spotted:
         lines.append(
@@ -216,8 +251,6 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
             "calling CQ / band may be dead where you are."
         )
         return lines
-
-    current_band = mm_current_band(view)
 
     for band in view.mm_bands():
         series = mm_band_series(history, band)
@@ -240,16 +273,18 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
                 f"{speed_s}"
             )
 
-    # QSY suggestion: compare my current band to the best DX opportunity.
+    # QSY suggestion: compare where I'm actually running now to the best DX
+    # opportunity (only meaningful when running a single band).
     rec = recommended_dx_band(view, history, cfg.avg_windows)
-    if rec and current_band:
+    if rec and len(run_status.running_bands) == 1:
+        cur = run_status.running_bands[0]
         rec_band, rec_cont, rec_sp = rec
-        if rec_band != current_band:
+        if rec_band != cur:
             lines.append("")
             lines.append(
-                f"  >> QSY SUGGESTION: you're strongest on {current_band}, "
-                f"but the cohort data says {rec_band} is the band into "
-                f"{rec_cont} ({rec_sp} distinct spotters). Consider a move."
+                f"  >> QSY SUGGESTION: you're running {cur}, but the cohort "
+                f"data says {rec_band} is the band into {rec_cont} "
+                f"({rec_sp} distinct spotters). Consider a move."
             )
     return lines
 
@@ -270,11 +305,13 @@ def format_report(summary: WindowSummary, history: list[WindowSummary],
                   cfg: RenderConfig) -> str:
     """Render the full report as plain text over the averaging-window view."""
     view = aggregate_windows(summary, history, cfg.avg_windows)
+    run_status = compute_run_status(summary, history, cfg.window_secs,
+                                    cfg.category_key)
     lines: list[str] = []
     lines += _render_header(view, cfg)
     lines += _render_matrix(view, history, cfg)
     lines += _render_trends(view, history, cfg)
     lines += _render_recommendation(view, history, cfg)
-    lines += _render_mm(view, history, cfg)
+    lines += _render_mm(view, history, cfg, run_status)
     lines += _render_footer()
     return "\n".join(lines)
