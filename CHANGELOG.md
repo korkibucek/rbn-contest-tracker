@@ -9,7 +9,14 @@ internal APIs** without a major-version bump.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- MIT `LICENSE`.
+- `pyproject.toml` packaging with a `rbn-contest-tracker` console entry point;
+  installable via `pip` / `pipx` (version single-sourced from
+  `rbn_tracker.__version__`).
+- GitHub Actions CI: test suite on Python 3.10–3.13, `pyflakes` lint, and a
+  package-build + entry-point smoke test.
 
 ## [0.1.0a1] — alpha
 

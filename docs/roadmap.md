@@ -37,8 +37,8 @@ rough, and what needs to happen before a public **v1.0.0**.
   skimmer gaps can misread.
 - **Reach depends on skimmer density**, which is thin in AF/SA/OC. The coverage
   factor compensates, but low absolute counts there remain inherently noisy.
-- **No license declared** (planned before v1.0.0).
-- **Not packaged** for PyPI; Windows untested.
+- **Not yet published to PyPI** (installable from source via `pip`/`pipx`);
+  Windows untested.
 
 ## Toward v1.0.0
 
@@ -46,14 +46,16 @@ Roughly in priority order. Items are intentionally not dated.
 
 ### Must-have for 1.0.0
 
-- [ ] **Choose and add a license** (`LICENSE` file) and update the README.
+- [x] **License** — MIT (`LICENSE`), referenced from the README.
+- [x] **Packaging** — `pyproject.toml` with a `rbn-contest-tracker` console
+      entry point; builds an sdist + wheel; installable via `pip`/`pipx`.
+- [x] **CI** — GitHub Actions runs the test suite on Python 3.10–3.13, plus a
+      pyflakes lint and a package-build smoke test.
+- [ ] **Publish to PyPI** so `pip install rbn-contest-tracker` works.
 - [ ] **Resolve opponents `auto`**: either verify and harden the
       contestonlinescore.com integration against the live API (and document the
-      exact response shape), or clearly mark it experimental/opt-in and make
-      `manual` the documented default.
-- [ ] **Packaging**: add `pyproject.toml`, a console entry point
-      (`rbn-contest-tracker`), and publish to PyPI (`pipx install` story).
-- [ ] **CI**: run the test suite on pushes/PRs across supported Python versions.
+      exact response shape), or keep it clearly experimental/opt-in with
+      `manual` as the documented default. (Currently kept experimental.)
 - [ ] **Stabilise the CLI surface** — review flag names/defaults and commit to
       them, since post-1.0 changes should follow semver.
 

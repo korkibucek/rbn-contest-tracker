@@ -25,6 +25,26 @@ python3 -m rbn_tracker --help
 
 `python3 -m rbn_tracker --version` prints the current version.
 
+### Install with pip / pipx
+
+Installing also adds a `rbn-contest-tracker` console command. There are no
+third-party dependencies.
+
+```bash
+pip install .                      # from a clone
+pip install "git+https://github.com/korkibucek/rbn-contest-tracker.git"  # without cloning
+pipx install .                     # isolated, on your PATH (recommended)
+```
+
+Then:
+
+```bash
+rbn-contest-tracker --mycall MM1E
+```
+
+Once published to PyPI, `pip install rbn-contest-tracker` / `pipx install
+rbn-contest-tracker` will work too.
+
 ### macOS: isolated virtualenv (recommended)
 
 A virtualenv isn't strictly required (the app is pure standard library), but it

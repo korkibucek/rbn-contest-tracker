@@ -32,7 +32,7 @@ section tracking your own station, and an optional opponents leaderboard.
 > covered by tests. The **opponents auto source is incomplete** — it needs a
 > contestonlinescore.com API key and the exact live response shape has not been
 > verified against the live site (see [Known limitations](#known-limitations)).
-> Not yet published to PyPI; install from source.
+> Installable via `pip`/`pipx`, but not yet published to PyPI.
 
 ## What it does
 
@@ -72,6 +72,19 @@ git clone https://github.com/korkibucek/rbn-contest-tracker.git
 cd rbn-contest-tracker
 python3 -m rbn_tracker --help
 ```
+
+Or install it (no third-party dependencies), which also provides a
+`rbn-contest-tracker` console command:
+
+```bash
+pip install .            # from a clone
+# or, without cloning:
+pip install "git+https://github.com/korkibucek/rbn-contest-tracker.git"
+```
+
+> Not yet published to PyPI; `pip install rbn-contest-tracker` will work once it
+> is. `pipx install .` is recommended if you want it on your `PATH` in an
+> isolated environment.
 
 On macOS, the helper script sets up an isolated virtualenv and verifies the
 install by running the test suite:
@@ -125,8 +138,9 @@ In the viewer: **`q`** quits, **`p`** pauses/resumes. Full walk-through in
   brief S&P excursion or a skimmer gap can read as "gone quiet".
 - **Reach depends on skimmer coverage** — dense in NA/EU, thin in AF/SA/OC. A
   coverage factor compensates, but absolute counts into sparse regions stay low.
-- Not on PyPI; no Windows-specific packaging (should run anywhere Python +
-  `curses` do, but it's developed/tested on macOS and Linux).
+- Installable via `pip`, but **not yet published to PyPI**. Developed and tested
+  on macOS and Linux; Windows is untested (the viewer needs a `curses`-capable
+  terminal).
 
 ## Contributing
 
@@ -139,9 +153,7 @@ python3 -m unittest discover -s tests -t .
 
 ## License
 
-No license has been declared yet; this is planned before the public v1.0.0
-release (see [docs/roadmap.md](docs/roadmap.md)). Until then, all rights are
-reserved by the repository owner.
+Released under the [MIT License](LICENSE).
 
 ## About RBN
 

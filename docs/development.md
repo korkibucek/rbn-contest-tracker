@@ -96,14 +96,23 @@ frames — see how the tests/smoke checks do it. Always check both Unicode and
 The project will follow [SemVer](https://semver.org/) from 1.0.0. While in
 `0.x`, treat every release as potentially breaking.
 
+Continuous integration (GitHub Actions, `.github/workflows/ci.yml`) runs the
+test suite on Python 3.10–3.13, a `pyflakes` lint, and a package build +
+console-entry-point smoke test on every push to `main` and every PR.
+
+The version is single-sourced from `rbn_tracker/__init__.__version__` and read
+dynamically by `pyproject.toml`, so bumping it in one place updates the package.
+
 ### Release checklist
 
-1. Ensure `python3 -m unittest discover -s tests -t .` passes.
+1. Ensure `python3 -m unittest discover -s tests -t .` passes (CI does this too).
 2. Move the **Unreleased** items in [CHANGELOG.md](../CHANGELOG.md) under a new
    version heading with today's date.
 3. Bump `__version__` in `rbn_tracker/__init__.py` to match.
 4. Update docs affected by the change (see the docs checklist below).
-5. Tag the release: `git tag vX.Y.Z && git push --tags`.
+5. Build and check the artifacts: `python -m build` (produces `dist/`).
+6. Tag the release: `git tag vX.Y.Z && git push --tags`.
+7. (When publishing) upload to PyPI with `twine upload dist/*`.
 
 ### Keeping docs in step
 
