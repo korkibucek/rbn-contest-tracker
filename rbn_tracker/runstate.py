@@ -65,6 +65,7 @@ class RunStatus:
     category_name: str
     max_tx: int
     running_bands: list[str] = field(default_factory=list)       # CQ now
+    frequencies: dict[str, float] = field(default_factory=dict)  # band -> kHz
     sp_or_off: list[tuple[str, int]] = field(default_factory=list)  # (band, min ago)
     qsy: list[tuple[str, str]] = field(default_factory=list)      # (from, to)
     band_changes_last_hour: int = 0
@@ -137,6 +138,15 @@ def compute_run_status(summary: WindowSummary, history: list[WindowSummary],
                 status.band_changes_last_hour += 1
 
     status.running_bands.sort(key=band_sort_key)
+
+    # Freshest run frequency per running band: the most recent window that has
+    # the tracked station on that band wins.
+    for band in status.running_bands:
+        for w in reversed(windows):
+            f = w.mm_band_freq(band)
+            if f is not None:
+                status.frequencies[band] = f
+                break
 
     # QSY inference: a band that went quiet ~when another band's run started is
     # a band change. Pair most-recent quiet with most-recently-started run.

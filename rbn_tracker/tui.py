@@ -200,11 +200,19 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
                                     cfg.category_key)
     open_dx_bands = [s[1] for s in scored] if scored else []
     arrow_to = "→" if uc else "->"
-    frame.append([(f"  RUN [{run_status.category_name}, "
-                   f"{run_status.max_tx} TX]: ", "hdr"),
-                  ("running CQ on ", "dim"),
-                  (", ".join(run_status.running_bands) or "nothing",
-                   "good" if run_status.running_bands else "warn")])
+    run_line: Line = [(f"  RUN [{run_status.category_name}, "
+                       f"{run_status.max_tx} TX]: ", "hdr"),
+                      ("running CQ on ", "dim")]
+    if run_status.running_bands:
+        for i, b in enumerate(run_status.running_bands):
+            if i:
+                run_line.append((", ", "dim"))
+            run_line.append((b, "good"))
+            if b in run_status.frequencies:
+                run_line.append((f" @ {run_status.frequencies[b]:.1f}", "accent"))
+    else:
+        run_line.append(("nothing", "warn"))
+    frame.append(run_line)
     if run_status.max_tx == 1 and run_status.running_count > 1:
         frame.append([(f"    running {run_status.running_count} bands at once "
                        "(single TX) — band change in progress?", "warn")])
