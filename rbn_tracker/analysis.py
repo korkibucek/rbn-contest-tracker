@@ -109,6 +109,7 @@ def aggregate_windows(summary: WindowSummary, history: list[WindowSummary],
             o.spotters |= obs.spotters
             o.snrs += obs.snrs
             o.speeds += obs.speeds
+            o.freqs += obs.freqs
     return view
 
 

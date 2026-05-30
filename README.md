@@ -118,7 +118,8 @@ had been running, you've almost certainly gone **S&P** (calling others, which
 skimmers don't spot) or **changed band**. The Your Station panel shows a **RUN**
 block that:
 
-- lists the band(s) you're **running CQ on right now**;
+- lists the band(s) you're **running CQ on right now**, with your **current
+  frequency** (median of the skimmer reports) — e.g. `running CQ on: 15m @ 21024.0`;
 - flags a band you've gone quiet on — `40m: no CQ for ~3m — gone S&P or off`;
 - infers band changes — `band change: 40m → 15m (run moved)`;
 - checks your effort against the entered **category** (`--category`).

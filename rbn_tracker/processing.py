@@ -74,16 +74,23 @@ class MmObservation:
     spotters: set[str] = field(default_factory=set)
     snrs: list[int] = field(default_factory=list)
     speeds: list[int] = field(default_factory=list)
+    freqs: list[float] = field(default_factory=list)
 
     def add(self, spot: Spot) -> None:
         self.spotters.add(spot.spotter)
         self.snrs.append(spot.snr_db)
+        self.freqs.append(spot.freq_khz)
         if spot.speed_wpm is not None:
             self.speeds.append(spot.speed_wpm)
 
     @property
     def distinct_spotters(self) -> int:
         return len(self.spotters)
+
+    @property
+    def frequency(self) -> float | None:
+        """Representative run frequency (kHz) -- median of skimmer reports."""
+        return statistics.median(self.freqs) if self.freqs else None
 
     @property
     def best_snr(self) -> int | None:
@@ -141,6 +148,14 @@ class WindowSummary:
             if b == band:
                 s |= obs.spotters
         return len(s)
+
+    def mm_band_freq(self, band: str) -> float | None:
+        """Representative frequency (kHz) the tracked station ran on this band."""
+        freqs: list[float] = []
+        for (b, _c), obs in self.mm.items():
+            if b == band:
+                freqs.extend(obs.freqs)
+        return statistics.median(freqs) if freqs else None
 
     @property
     def mm_spotted(self) -> bool:

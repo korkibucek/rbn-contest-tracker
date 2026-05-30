@@ -211,7 +211,12 @@ def _render_run_status(status: RunStatus, open_dx_bands: list[str],
     me = cfg.mycall
     lines = [f"  RUN [{status.category_name}, {status.max_tx} TX]:"]
     if status.running_bands:
-        lines.append(f"    running CQ on: {', '.join(status.running_bands)}")
+        runs = ", ".join(
+            f"{b} @ {status.frequencies[b]:.1f}" if b in status.frequencies
+            else b
+            for b in status.running_bands
+        )
+        lines.append(f"    running CQ on: {runs}")
     else:
         lines.append("    no CQ run detected -- S&P, between bands, or off air")
     # Single-op sanity: shouldn't be running two bands at once.

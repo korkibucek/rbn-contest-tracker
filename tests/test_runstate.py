@@ -57,6 +57,13 @@ class TestRunStatus(unittest.TestCase):
         self.assertEqual(rs.qsy, [])
         self.assertEqual(rs.sp_or_off, [])
 
+    def test_run_frequency_reported(self):
+        proc, t = _run([["40m"], ["40m"], ["40m"]])
+        rs = compute_run_status(proc.snapshot(t), list(proc.history), 60, "single")
+        # _run() spots MM1E on the 40m test frequency 7032 kHz.
+        self.assertIn("40m", rs.frequencies)
+        self.assertAlmostEqual(rs.frequencies["40m"], 7032.0, places=1)
+
     def test_qsy_detected(self):
         proc, t = _run([["40m"], ["40m"], ["40m"], ["15m"], ["15m"]])
         rs = compute_run_status(proc.snapshot(t), list(proc.history), 60, "single")
