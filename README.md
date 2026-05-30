@@ -70,6 +70,7 @@ venv's Python against `python -m rbn_tracker`.
 | `--mycall` | `MM1E` | Station tracked in the "me" section |
 | `--window SECONDS` | `60` | Base sampling/commit window (the "current interval") |
 | `--avg-window MINUTES` | `15` | Averaging window for the band matrix, recommendation and your-station sections — magnitudes are totals over this span |
+| `--category CAT` | `single` | Contest category for run/band-change tracking: `single`, `m2` (multi-two), `mm` (multi-multi) |
 | `--history N` | `5` | Minimum windows of history retained (an hour is always kept regardless, for the 60 min horizon) |
 | `--csv FILE` | – | Append per-window, per-cell stats to a CSV |
 | `--min-snr DB` | – | Ignore spots weaker than this |
@@ -100,13 +101,35 @@ jump around on a single noisy 60 s window; the trend arrows show the direction.
    outranks a higher-count but *fading* one. Top overall band, best band per
    open continent (with a one-line justification), and which continents look
    closed.
-5. **Your station (MM1E)** — bands you were spotted on over the last 15 min,
-   distinct spotters per band, continents reached, best/median SNR, CW speed,
-   and the multi-horizon trend logic. If you weren't spotted it says so plainly.
-   If you're on a different band than the data recommends, it prints a **QSY
-   suggestion**.
+5. **Your station (MM1E)** — a **RUN** block (which bands you're running CQ on,
+   band-change/S&P detection, category checks — see below), then bands you were
+   spotted on over the last 15 min, distinct spotters per band, continents
+   reached, best/median SNR, CW speed, and the multi-horizon trend logic. If you
+   weren't spotted it says so plainly. If you're running a different band than
+   the data recommends, it prints a **QSY suggestion**.
 6. **Footer caveat** — RBN coverage is dense in NA/EU and thin in AF/SA/OC, so
    lean on trends and distinct-spotter counts, not absolute numbers.
+
+## Run / band-change detection (your station)
+
+RBN skimmers spot stations that are **calling CQ**, so a spot of your station on
+a band means you were *running* there. When you stop being spotted on a band you
+had been running, you've almost certainly gone **S&P** (calling others, which
+skimmers don't spot) or **changed band**. The Your Station panel shows a **RUN**
+block that:
+
+- lists the band(s) you're **running CQ on right now**;
+- flags a band you've gone quiet on — `40m: no CQ for ~3m — gone S&P or off`;
+- infers band changes — `band change: 40m → 15m (run moved)`;
+- checks your effort against the entered **category** (`--category`).
+
+Categories (by number of simultaneously transmitted run signals):
+
+| `--category` | Meaning | Logic |
+|--------------|---------|-------|
+| `single` | Single-Op / Multi-Single — one signal at a time | Expects one run band; warns if it sees two at once; suggests a QSY when a better DX band is open |
+| `m2` | Multi-Two — two transmitters at once | Shows `running N/2 transmitters`; if a transmitter is idle while a DX band is open, says to put a radio there; notes the CQ WW 8 band-changes/hour/TX limit |
+| `mm` | Multi-Multi — one signal per band (up to 6 on HF) | Flags open DX bands you aren't running so you can fill them |
 
 ## Trends
 
@@ -131,6 +154,7 @@ constants at the top of [`rbn_tracker/processing.py`](rbn_tracker/processing.py)
 | `rbn_tracker/spots.py` | Spot-line parsing |
 | `rbn_tracker/processing.py` | Windowing, aggregation, trend logic |
 | `rbn_tracker/analysis.py` | Recommendation/scoring + horizon trends (shared) |
+| `rbn_tracker/runstate.py` | Run / band-change detection + contest categories |
 | `rbn_tracker/report.py` | Classic text report rendering |
 | `rbn_tracker/tui.py` | Full-screen interactive viewer (curses) |
 | `rbn_tracker/feed.py` | Telnet feed (reconnect/backoff) + replay |
