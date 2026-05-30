@@ -335,7 +335,7 @@ def _opponents_body(opponents, uc) -> list[Line]:
         return [[(opponents.message or "no opponents", "dim")]]
     rows: list[Line] = [[
         (f"{'':2}{'call':<11}{'QSOs':>7}{'Mult':>6}{'Score':>12}"
-         f"  {'vs you':<16} run", "dim")]]
+         f"  {'vs you':<19} run", "dim")]]
     for e in opponents.entries:
         rows.append(_opponent_row(e, uc))
     if opponents.message:
@@ -356,6 +356,7 @@ def _opponent_row(e, uc: bool) -> Line:
         dm = f"{e.d_mults:+d}M " if e.d_mults is not None else ""
         dsr = f"{ds/1000:+.1f}k" if abs(ds) >= 1000 else f"{ds:+d}"
         delta_txt = f"{dq}{dm}{dsr}"
+    delta_txt = delta_txt[:19]  # never spill into the run column
     if e.run is not None:
         run_txt, run_style = f"{e.run.freq_khz:.1f} {e.run.band}", "good"
     else:
@@ -367,7 +368,7 @@ def _opponent_row(e, uc: bool) -> Line:
         (f"{_fmt_num(e.qsos):>7}", "normal"),
         (f"{_fmt_num(e.mults):>6}", "normal"),
         (f"{_fmt_num(e.score):>12}", "normal"),
-        (f"  {delta_txt:<16}", delta_style),
+        (f"  {delta_txt:<19} ", delta_style),
         (run_txt, run_style),
     ]
 
