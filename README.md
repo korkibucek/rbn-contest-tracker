@@ -71,10 +71,11 @@ venv's Python against `python -m rbn_tracker`.
 | `--window SECONDS` | `60` | Base sampling/commit window (the "current interval") |
 | `--avg-window MINUTES` | `15` | Averaging window for the band matrix, recommendation and your-station sections — magnitudes are totals over this span |
 | `--category CAT` | `single` | Contest category for run/band-change tracking: `single`, `m2` (multi-two), `mm` (multi-multi) |
-| `--opponents MODE` | `auto` | Opponents leaderboard source: `auto` (contestonlinescore.com), `manual`, `off` |
+| `--opponents MODE` | `off` | Opponents leaderboard source: `off`, `auto` (contestonlinescore.com, needs `--score-url`/`--contest`), `manual` |
 | `--opponents-file FILE` | – | Competitor list for `manual` mode |
 | `--score-url URL` | – | Override the live-score JSON endpoint for `auto` |
 | `--contest ID` | – | Contest id for the `auto` live-score source |
+| `--score-api-key KEY` | – | contestonlinescore.com API key (or `COS_API_KEY` env) for authenticated `auto` mode |
 | `--opponents-window N` | `5` | Show ±N stations around you |
 | `--history N` | `5` | Minimum windows of history retained (an hour is always kept regardless, for the 60 min horizon) |
 | `--csv FILE` | – | Append per-window, per-cell stats to a CSV |
@@ -153,12 +154,19 @@ OPPONENTS (±5, Single / Multi-Single) -- manual (opponents.txt)
   GW4ZZZ       1,380    400    1,120,000   -20Q -5M -60.0k    14037.1 20m
 ```
 
-Two sources (`--opponents`):
+The panel is **off by default** (the live source needs configuration). Turn it
+on with `--opponents auto` or `--opponents manual`.
 
-- **`auto`** (default) — pulls the live scoreboard for your category from
+Sources (`--opponents`):
+
+- **`auto`** — pulls the live scoreboard for your category from
   **contestonlinescore.com**; your own totals come from the scoreboard too. Set
   the contest with `--contest ID`, or point at a specific feed with
   `--score-url URL`. On any failure it degrades gracefully and the panel says so.
+  The COS data API is gated — request a key from `admin@contestonlinescore.com`
+  and pass it with `--score-api-key KEY` (or the `COS_API_KEY` env var); the app
+  then authenticates and pulls scores for you. Without a key, `--score-url` must
+  point at a reachable JSON feed (not the HTML scoreboard page).
 - **`manual`** — `--opponents-file FILE`, one competitor per line:
   `callsign[, qsos, mults, score]` (`#` comments allowed). Include your own call
   with your score so the list can rank around you. Run frequencies still come

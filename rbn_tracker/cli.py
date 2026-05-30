@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 import threading
@@ -36,9 +37,10 @@ def build_opponents_manager(args, cfg) -> "OpponentsManager | None":
         return OpponentsManager(source, cfg.mycall, category_name,
                                 window=args.opponents_window, auto=False)
     # auto
+    api_key = args.score_api_key or os.environ.get("COS_API_KEY")
     source = ContestOnlineScoreSource(
         category=cfg.category_key, mycall=cfg.mycall,
-        url=args.score_url, contest=args.contest)
+        url=args.score_url, contest=args.contest, api_key=api_key)
     return OpponentsManager(source, cfg.mycall, category_name,
                             window=args.opponents_window, auto=True)
 
@@ -82,9 +84,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history", type=int, default=5, metavar="N",
                    help="number of windows kept for trend analysis (default 5)")
     p.add_argument("--opponents", choices=["auto", "manual", "off"],
-                   default="auto",
-                   help="opponents leaderboard source (default auto: live "
-                        "scores from contestonlinescore.com)")
+                   default="off",
+                   help="opponents leaderboard source (default off; 'auto' "
+                        "pulls live scores from contestonlinescore.com -- needs "
+                        "--score-url/--contest; 'manual' uses --opponents-file)")
     p.add_argument("--opponents-file", metavar="FILE",
                    help="manual opponents list (callsign[,qsos,mults,score] "
                         "per line); used with --opponents manual")
@@ -92,6 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="override the live-score endpoint (JSON) for auto mode")
     p.add_argument("--contest", metavar="ID",
                    help="contest id for the auto live-score source")
+    p.add_argument("--score-api-key", metavar="KEY", default=None,
+                   help="contestonlinescore.com API key for authenticated auto "
+                        "mode (or set the COS_API_KEY environment variable)")
     p.add_argument("--opponents-window", type=int, default=5, metavar="N",
                    help="show +/-N stations around you (default 5)")
     p.add_argument("--csv", metavar="FILE", help="append per-window stats to CSV")
