@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 
 from .analysis import (
+    aggregate_windows,
     band_horizon_trends,
     best_band_per_continent,
     display_bands,
@@ -89,10 +90,12 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
                 cfg: RenderConfig, state: TuiState) -> Frame:
     uc = cfg.use_unicode
     frame: Frame = []
+    view = aggregate_windows(summary, history, cfg.avg_windows)
+    span = cfg.avg_label
+    sep = "·" if uc else "-"
 
     # --- title bar ---
     utc = time.strftime("%H:%M:%SZ", time.gmtime(state.now))
-    win = cfg.window_secs
     conn = "LIVE" if (state.source == "live" and state.connected) else (
         "CONNECTING" if state.source == "live" else "REPLAY")
     conn_style = "good" if conn == "LIVE" else ("warn" if conn == "CONNECTING" else "accent")
@@ -101,8 +104,8 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
         (f" {utc} ", "dim"),
         (f"up {_fmt_uptime(state.now - state.started_at)} ", "dim"),
         (conn, conn_style),
-        (f"  win {win}s  ", "dim"),
-        (f"spots/win {summary.total_spots} (UK {summary.total_uk_spots})  ", "normal"),
+        (f"  last {span}  ", "dim"),
+        (f"spots {view.total_spots} (UK {view.total_uk_spots})  ", "normal"),
         (f"rx {state.spots_seen}", "dim"),
         (f"  tracking {cfg.mycall}", "accent"),
     ]
@@ -112,13 +115,13 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     frame.append([(_legend_text(uc), "dim")])
     frame.append([("", "normal")])
 
-    bands = display_bands(summary, history)
+    bands = display_bands(view, history)
 
     # --- matrix ---
     cross = "×" if uc else "x"
     dot = "·" if uc else "."
     frame.append([(f"BAND {cross} CONTINENT  ", "hdr"),
-                  ("(spots, distinct spotters)", "dim")])
+                  (f"(spots, distinct spotters {sep} last {span})", "dim")])
     col_w = 11
     head: Line = [(f"{'band':<6}", "dim")]
     for c in MATRIX_COLS:
@@ -126,12 +129,12 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     head.append(("   now", "dim"))
     frame.append(head)
     if not bands:
-        frame.append([("  (no UK/IE spots in the current window or recent "
+        frame.append([(f"  (no UK/IE spots in the last {span} or recent "
                        "history)", "dim")])
     for band in bands:
         line: Line = [(f"{band:<6}", "accent")]
         for cont in MATRIX_COLS:
-            cell = summary.cell(band, cont)
+            cell = view.cell(band, cont)
             if cell and cell.count:
                 txt = f"{cell.count:>4}({cell.distinct_spotters:>2})"
                 style = "good" if cont != "EU" else "normal"
@@ -160,17 +163,19 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     frame.append([("", "normal")])
 
     # --- recommendation ---
-    frame.append([("RECOMMENDATION  ", "hdr"), ("work DX (non-EU)", "dim")])
-    scored = score_bands(summary, history)
+    frame.append([("RECOMMENDATION  ", "hdr"),
+                  (f"work DX (non-EU) {sep} last {span}", "dim")])
+    scored = score_bands(view, history, cfg.avg_windows)
     if not scored:
-        frame.append([("  No DX activity this window — EU-only or thin "
-                       "coverage; watch the trends.", "dim")])
+        frame.append([(f"  No DX activity in the last {span} {sep} EU-only or "
+                       "thin coverage; watch the trends.", "dim")])
     else:
         top = scored[0]
         frame.append([("  TOP DX BAND: ", "normal"), (top[1], "good"),
                       (f"  {top[2]} spotters / {top[3]} spots  ", "normal"),
                       (top[4], _trend_style(top[4]))])
-        for cont, best in best_band_per_continent(summary, history).items():
+        for cont, best in best_band_per_continent(view, history,
+                                                  cfg.avg_windows).items():
             if best is None:
                 frame.append([(f"    {cont}: ", "dim"), ("closed", "fading")])
                 continue
@@ -188,15 +193,16 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     # --- MM / your station ---
     dash = "—" if uc else "-"
     frame.append([(f"YOUR STATION {dash} {cfg.mycall}  ", "hdr"),
-                  ("(getting out)", "dim")])
-    if not summary.mm_spotted:
-        frame.append([(f"  {cfg.mycall} not spotted this window — check you're "
-                       "calling CQ / band may be dead where you are.", "warn")])
+                  (f"(getting out {sep} last {span})", "dim")])
+    if not view.mm_spotted:
+        frame.append([(f"  {cfg.mycall} not spotted in the last {span} {sep} "
+                       "check you're calling CQ / band may be dead where you "
+                       "are.", "warn")])
     else:
-        for band in summary.mm_bands():
+        for band in view.mm_bands():
             series = mm_band_series(history, band)
             trends = mm_horizon_trends(history, band, cfg.window_secs)
-            total_sp = summary.mm_band_spotters(band)
+            total_sp = view.mm_band_spotters(band)
             line: Line = [
                 (f"  {cfg.mycall} {band}: ", "accent"),
                 (f"{total_sp} spotters  ", "good"),
@@ -205,7 +211,7 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
             line += _horizon_segments(trends, uc)
             frame.append(line)
             for cont in CONTINENTS:
-                obs = summary.mm.get((band, cont))
+                obs = view.mm.get((band, cont))
                 if not obs:
                     continue
                 speed = obs.typical_speed
@@ -216,13 +222,13 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
                      f"{_fmt_snr(obs.best_snr)}, med {_fmt_snr(obs.median_snr)}"
                      f"{speed_s}", "normal"),
                 ])
-        rec = recommended_dx_band(summary, history)
-        current = mm_current_band(summary)
+        rec = recommended_dx_band(view, history, cfg.avg_windows)
+        current = mm_current_band(view)
         if rec and current and rec[0] != current:
             frame.append([
                 (f"  {'»' if uc else '>>'} QSY: ", "warn"),
                 (f"you're strongest on {current}, but {rec[0]} is the band into "
-                 f"{rec[1]} now ({rec[2]} spotters). Consider a move.", "normal"),
+                 f"{rec[1]} ({rec[2]} spotters). Consider a move.", "normal"),
             ])
 
     return frame

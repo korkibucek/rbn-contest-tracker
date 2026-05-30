@@ -31,9 +31,6 @@ GONE_FLOOR = 1  # now <= this (with prior activity) -> GONE
 # Labels use "min" (not "m") so they don't read as metre bands (40m vs 10min).
 TREND_HORIZONS = [("10min", 600), ("30min", 1800), ("60min", 3600)]
 MAX_HORIZON_SECS = max(secs for _label, secs in TREND_HORIZONS)
-# How many recent windows the "now"/recommendation trend looks at (keeps the
-# immediate signal responsive even though we retain an hour of history).
-SHORT_TREND_WINDOWS = 5
 
 # Trend labels
 RISING, STEADY, FADING, NEW, GONE = "RISING", "STEADY", "FADING", "NEW", "GONE"
@@ -163,8 +160,6 @@ class SpotProcessor:
         # (an hour) regardless of the requested short-trend depth.
         retain = max(history, windows_for_secs(MAX_HORIZON_SECS, window_secs)) + 1
         self.history: deque[WindowSummary] = deque(maxlen=max(1, retain))
-        # Windows used for the responsive "now" / recommendation trend.
-        self.short_trend_windows = max(2, history)
 
     def add(self, spot: Spot) -> None:
         if self.min_snr is not None and spot.snr_db < self.min_snr:
@@ -317,15 +312,6 @@ def windows_for_secs(secs: int, window_secs: int) -> int:
 def band_spotter_series(history: list[WindowSummary], band: str) -> list[int]:
     """Distinct-spotter count for ``band`` across each window (oldest..newest)."""
     return [w.band_spotters(band) for w in history]
-
-
-def cell_spotter_series(history: list[WindowSummary], band: str,
-                        cont: str) -> list[int]:
-    out = []
-    for w in history:
-        cell = w.cell(band, cont)
-        out.append(cell.distinct_spotters if cell else 0)
-    return out
 
 
 def mm_band_series(history: list[WindowSummary], band: str) -> list[int]:

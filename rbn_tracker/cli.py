@@ -35,7 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"station to track in the 'me' section "
                         f"(default {DEFAULT_MYCALL})")
     p.add_argument("--window", type=int, default=60, metavar="SECONDS",
-                   help="window length in seconds (default 60)")
+                   help="base sampling/commit window in seconds (default 60)")
+    p.add_argument("--avg-window", type=float, default=15.0, metavar="MINUTES",
+                   help="averaging window (minutes) for the band matrix, "
+                        "recommendation and your-station sections (default 15)")
     p.add_argument("--history", type=int, default=5, metavar="N",
                    help="number of windows kept for trend analysis (default 5)")
     p.add_argument("--csv", metavar="FILE", help="append per-window stats to CSV")
@@ -254,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
         mycall=args.mycall.strip().upper(),
         use_unicode=(not args.ascii) and _supports_unicode(),
         window_secs=args.window,
+        avg_window_secs=int(round(args.avg_window * 60)),
     )
     csv_writer = CsvWriter(args.csv) if args.csv else None
 
