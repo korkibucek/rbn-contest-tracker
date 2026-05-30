@@ -12,9 +12,12 @@ import time
 from dataclasses import dataclass
 
 from .analysis import (
+    DEFAULT_AVG_WINDOW_SECS,
+    aggregate_windows,
     band_horizon_trends,
     best_band_per_continent,
     display_bands,
+    minutes_label,
     mm_current_band,
     mm_horizon_trends,
     recommended_dx_band,
@@ -29,8 +32,8 @@ from .processing import (
     STEADY,
     WindowSummary,
     band_spotter_series,
-    cell_spotter_series,
     mm_band_series,
+    windows_for_secs,
 )
 
 _SPARK_UNICODE = "▁▂▃▄▅▆▇█"
@@ -46,11 +49,26 @@ class RenderConfig:
     mycall: str = "MM1E"
     use_unicode: bool = True
     window_secs: int = 60
+    avg_window_secs: int = DEFAULT_AVG_WINDOW_SECS  # matrix/rec/your-station view
+
+    @property
+    def avg_windows(self) -> int:
+        return windows_for_secs(self.avg_window_secs, self.window_secs)
+
+    @property
+    def avg_label(self) -> str:
+        return minutes_label(self.avg_window_secs)
 
 
-def sparkline(series: list[int], use_unicode: bool = True) -> str:
+SPARK_MAX_POINTS = 24  # cap width; history can hold an hour of windows
+
+
+def sparkline(series: list[int], use_unicode: bool = True,
+              max_points: int = SPARK_MAX_POINTS) -> str:
     if not series:
         return ""
+    if max_points and len(series) > max_points:
+        series = series[-max_points:]  # most recent points only
     chars = _SPARK_UNICODE if use_unicode else _SPARK_ASCII
     lo, hi = min(series), max(series)
     if hi == lo:
@@ -88,33 +106,28 @@ def _legend(use_unicode: bool) -> str:
             f"{a(NEW)} new  {a(GONE)} gone)")
 
 
-def _prev_now(series: list[int]) -> tuple[int, int]:
-    cur = series[-1] if series else 0
-    prev = series[-2] if len(series) >= 2 else 0
-    return prev, cur
-
-
 # --- Sections --------------------------------------------------------------
 
-def _render_header(summary: WindowSummary, cfg: RenderConfig) -> list[str]:
-    utc = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(summary.end_time))
-    win = int(round(summary.end_time - summary.start_time))
+def _render_header(view: WindowSummary, cfg: RenderConfig) -> list[str]:
+    utc = time.strftime("%Y-%m-%d %H:%M:%SZ", time.gmtime(view.end_time))
     return [
         "=" * 78,
-        f" RBN UK/IE PROPAGATION REPORT   {utc}   (window {win}s)",
-        f" spots in window: {summary.total_spots:<5d}   "
-        f"UK/IE spots: {summary.total_uk_spots:<5d}   "
+        f" RBN UK/IE PROPAGATION REPORT   {utc}   (last {cfg.avg_label})",
+        f" spots: {view.total_spots:<5d}   "
+        f"UK/IE spots: {view.total_uk_spots:<5d}   "
         f"tracking: {cfg.mycall}",
         "=" * 78,
     ]
 
 
-def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
+def _render_matrix(view: WindowSummary, history: list[WindowSummary],
                    cfg: RenderConfig) -> list[str]:
-    bands = display_bands(summary, history)
-    lines = ["", "BAND x CONTINENT  (spots, distinct-spotters in parens)", ""]
+    bands = display_bands(view, history)
+    lines = ["", f"BAND x CONTINENT  (spots, distinct-spotters over last "
+             f"{cfg.avg_label})", ""]
     if not bands:
-        lines.append("  (no UK/IE spots this window or recent history)")
+        lines.append("  (no UK/IE spots in the last "
+                     f"{cfg.avg_label} or recent history)")
         return lines
 
     col_w = 11
@@ -126,7 +139,7 @@ def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
     for band in bands:
         row = f"{band:<6}"
         for cont in MATRIX_COLS:
-            cell = summary.cell(band, cont)
+            cell = view.cell(band, cont)
             if cell and cell.count:
                 row += f"{cell.count:>4}({cell.distinct_spotters:>2}){'':>{col_w-8}}"
             else:
@@ -137,9 +150,9 @@ def _render_matrix(summary: WindowSummary, history: list[WindowSummary],
     return lines
 
 
-def _render_trends(summary: WindowSummary, history: list[WindowSummary],
+def _render_trends(view: WindowSummary, history: list[WindowSummary],
                    cfg: RenderConfig) -> list[str]:
-    bands = display_bands(summary, history)
+    bands = display_bands(view, history)
     lines = ["",
              "BAND TRENDS (distinct DX spotters)   " + _legend(cfg.use_unicode),
              ""]
@@ -155,14 +168,16 @@ def _render_trends(summary: WindowSummary, history: list[WindowSummary],
     return lines
 
 
-def _render_recommendation(summary: WindowSummary,
+def _render_recommendation(view: WindowSummary,
                            history: list[WindowSummary],
                            cfg: RenderConfig) -> list[str]:
-    lines = ["", "BAND RECOMMENDATION (working DX -- activity into non-EU)", ""]
+    lines = ["", f"BAND RECOMMENDATION (working DX into non-EU, last "
+             f"{cfg.avg_label})", ""]
 
-    scored = score_bands(summary, history)
+    scored = score_bands(view, history, cfg.avg_windows)
     if not scored:
-        lines.append("  No DX (non-EU) activity from UK/IE this window.")
+        lines.append(f"  No DX (non-EU) activity from UK/IE in the last "
+                     f"{cfg.avg_label}.")
         lines.append("  Either EU-only conditions, or thin skimmer coverage "
                      "into DX -- watch the trends.")
         return lines
@@ -176,47 +191,45 @@ def _render_recommendation(summary: WindowSummary,
     # Best band per open DX continent.
     lines.append("")
     lines.append("  Best band per continent:")
-    for cont, best in best_band_per_continent(summary, history).items():
+    for cont, best in best_band_per_continent(view, history, cfg.avg_windows).items():
         if best is None:
             lines.append(f"    {cont}: closed (no UK/IE spots heard there)")
             continue
         band, cell, trend = best
-        cser = cell_spotter_series(history, band, cont)
-        prev, cur = _prev_now(cser)
         lines.append(
             f"    {cont}: {band}  "
             f"{cell.count} spots / {cell.distinct_spotters} spotters / "
             f"med {_fmt_snr(cell.median_snr)} / "
-            f"{prev}->{cur} {arrow(trend, cfg.use_unicode)} {trend}"
+            f"{arrow(trend, cfg.use_unicode)} {trend}"
         )
     return lines
 
 
-def _render_mm(summary: WindowSummary, history: list[WindowSummary],
+def _render_mm(view: WindowSummary, history: list[WindowSummary],
                cfg: RenderConfig) -> list[str]:
     me = cfg.mycall
-    lines = ["", f"YOUR STATION -- {me} (how well you're getting out)", ""]
+    lines = ["", f"YOUR STATION -- {me} (getting out, last {cfg.avg_label})", ""]
 
-    if not summary.mm_spotted:
+    if not view.mm_spotted:
         lines.append(
-            f"  {me} not spotted this window -- check you're calling CQ / "
-            "band may be dead where you are."
+            f"  {me} not spotted in the last {cfg.avg_label} -- check you're "
+            "calling CQ / band may be dead where you are."
         )
         return lines
 
-    current_band = mm_current_band(summary)
+    current_band = mm_current_band(view)
 
-    for band in summary.mm_bands():
+    for band in view.mm_bands():
         series = mm_band_series(history, band)
         trends = mm_horizon_trends(history, band, cfg.window_secs)
-        total_sp = summary.mm_band_spotters(band)
+        total_sp = view.mm_band_spotters(band)
         lines.append(
-            f"  {me} {band}: {total_sp} distinct spotters total   "
+            f"  {me} {band}: {total_sp} distinct spotters   "
             f"{sparkline(series, cfg.use_unicode)}  "
             f"{_horizon_strip(trends, cfg.use_unicode)}"
         )
         for cont in CONTINENTS:
-            obs = summary.mm.get((band, cont))
+            obs = view.mm.get((band, cont))
             if not obs:
                 continue
             speed = obs.typical_speed
@@ -228,7 +241,7 @@ def _render_mm(summary: WindowSummary, history: list[WindowSummary],
             )
 
     # QSY suggestion: compare my current band to the best DX opportunity.
-    rec = recommended_dx_band(summary, history)
+    rec = recommended_dx_band(view, history, cfg.avg_windows)
     if rec and current_band:
         rec_band, rec_cont, rec_sp = rec
         if rec_band != current_band:
@@ -236,8 +249,7 @@ def _render_mm(summary: WindowSummary, history: list[WindowSummary],
             lines.append(
                 f"  >> QSY SUGGESTION: you're strongest on {current_band}, "
                 f"but the cohort data says {rec_band} is the band into "
-                f"{rec_cont} right now ({rec_sp} distinct spotters). "
-                "Consider a move."
+                f"{rec_cont} ({rec_sp} distinct spotters). Consider a move."
             )
     return lines
 
@@ -256,12 +268,13 @@ def _render_footer() -> list[str]:
 
 def format_report(summary: WindowSummary, history: list[WindowSummary],
                   cfg: RenderConfig) -> str:
-    """Render the full once-per-minute report as plain text."""
+    """Render the full report as plain text over the averaging-window view."""
+    view = aggregate_windows(summary, history, cfg.avg_windows)
     lines: list[str] = []
-    lines += _render_header(summary, cfg)
-    lines += _render_matrix(summary, history, cfg)
-    lines += _render_trends(summary, history, cfg)
-    lines += _render_recommendation(summary, history, cfg)
-    lines += _render_mm(summary, history, cfg)
+    lines += _render_header(view, cfg)
+    lines += _render_matrix(view, history, cfg)
+    lines += _render_trends(view, history, cfg)
+    lines += _render_recommendation(view, history, cfg)
+    lines += _render_mm(view, history, cfg)
     lines += _render_footer()
     return "\n".join(lines)

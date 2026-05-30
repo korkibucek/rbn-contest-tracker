@@ -68,8 +68,9 @@ venv's Python against `python -m rbn_tracker`.
 |------|---------|---------|
 | `--callsign` | `M0TTT` | Callsign used to log in to the RBN feed |
 | `--mycall` | `MM1E` | Station tracked in the "me" section |
-| `--window SECONDS` | `60` | Window length (the "current interval") |
-| `--history N` | `5` | Windows used for the responsive "now"/recommendation trend (an hour of history is always retained for the longer horizons) |
+| `--window SECONDS` | `60` | Base sampling/commit window (the "current interval") |
+| `--avg-window MINUTES` | `15` | Averaging window for the band matrix, recommendation and your-station sections — magnitudes are totals over this span |
+| `--history N` | `5` | Minimum windows of history retained (an hour is always kept regardless, for the 60 min horizon) |
 | `--csv FILE` | – | Append per-window, per-cell stats to a CSV |
 | `--min-snr DB` | – | Ignore spots weaker than this |
 | `--tui` | auto | Force the full-screen interactive viewer |
@@ -83,21 +84,26 @@ venv's Python against `python -m rbn_tracker`.
 
 ## What it shows
 
-1. **Status bar** — UTC clock, uptime, connection state, spots/window, total
-   UK/IE spots, tracked call.
+The band matrix, recommendation and your-station magnitudes are all computed
+over the **averaging window** (`--avg-window`, default 15 min) so they don't
+jump around on a single noisy 60 s window; the trend arrows show the direction.
+
+1. **Status bar** — UTC clock, uptime, connection state, spots and UK/IE spots
+   over the averaging window, tracked call.
 2. **Band × continent matrix** — rows are active bands, columns are
-   `NA SA EU AF AS OC`. Each cell shows `spots(distinct-spotters)`, with the
-   current-interval trend arrow per band.
+   `NA SA EU AF AS OC`. Each cell shows `spots(distinct-spotters)` **totalled
+   over the last 15 min**, with the current-interval trend arrow per band.
 3. **Band trends** — for each band, a sparkline and the trend at four horizons:
    the **current interval, 10 min, 30 min and 60 min**.
 4. **Band recommendation** — bands ranked for working DX (activity into non-EU
-   continents), **trend-weighted** so a *rising* band outranks a higher-count
-   but *fading* one. Top overall band, best band per open continent (with a
-   one-line justification), and which continents look closed.
-5. **Your station (MM1E)** — bands you were spotted on, distinct spotters per
-   band, continents reached, best/median SNR, CW speed, and the same
-   multi-horizon trend logic. If you weren't spotted it says so plainly. If
-   you're on a different band than the data recommends, it prints a **QSY
+   continents over the last 15 min), **trend-weighted** so a *rising* band
+   outranks a higher-count but *fading* one. Top overall band, best band per
+   open continent (with a one-line justification), and which continents look
+   closed.
+5. **Your station (MM1E)** — bands you were spotted on over the last 15 min,
+   distinct spotters per band, continents reached, best/median SNR, CW speed,
+   and the multi-horizon trend logic. If you weren't spotted it says so plainly.
+   If you're on a different band than the data recommends, it prints a **QSY
    suggestion**.
 6. **Footer caveat** — RBN coverage is dense in NA/EU and thin in AF/SA/OC, so
    lean on trends and distinct-spotter counts, not absolute numbers.

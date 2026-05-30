@@ -72,8 +72,16 @@ class TestBuildFrame(unittest.TestCase):
         cfg = RenderConfig(mycall="MM1E", use_unicode=False, window_secs=60)
         frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
                             TuiState(now=60))
-        text = flatten_frame(frame)
-        text.encode("ascii")  # must not raise
+        flatten_frame(frame).encode("ascii")  # must not raise
+
+    def test_ascii_mode_empty_state_is_pure_ascii(self):
+        # The "no DX activity" / "not spotted" branches must also stay ASCII.
+        proc = SpotProcessor("MM1E", 60, 5)
+        proc.commit(60)  # an entirely empty window
+        cfg = RenderConfig(mycall="MM1E", use_unicode=False, window_secs=60)
+        frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
+                            TuiState(now=60))
+        flatten_frame(frame).encode("ascii")  # must not raise
 
 
 if __name__ == "__main__":
