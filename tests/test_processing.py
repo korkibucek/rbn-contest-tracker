@@ -101,6 +101,19 @@ class TestWindowing(unittest.TestCase):
         s = proc.roll(now=60)
         self.assertEqual(s.total_spots, 1)
 
+    def test_non_contest_band_dropped(self):
+        # WARC / off-band spots (band "?") are noise for a contest tool.
+        proc = SpotProcessor(mycall="MM1E", window_secs=60, history=5)
+        proc.add(spot("W3LPL-#", "G4ABC", 10136, 15, t=1))  # 30m -> "?"
+        proc.add(spot("K1TTT-#", "G4ABC", 18100, 15, t=2))  # 17m -> "?"
+        proc.add(spot("N4ZR-#", "MM1E", 5357, 15, t=3))     # 60m -> "?"
+        proc.add(spot("W3LPL-#", "G4ABC", 21025, 15, t=4))  # 15m -> kept
+        self.assertEqual(proc.pending(), 1)
+        s = proc.roll(now=60)
+        self.assertEqual(s.total_spots, 1)
+        self.assertEqual(s.active_bands(), ["15m"])
+        self.assertFalse(s.mm_spotted)  # the 60m MM1E spot was dropped
+
 
 if __name__ == "__main__":
     unittest.main()
