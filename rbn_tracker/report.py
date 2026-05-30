@@ -294,6 +294,52 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
     return lines
 
 
+def _num(n: int | None) -> str:
+    return "?" if n is None else f"{n:,}"
+
+
+def _delta_str(d_q: int | None, d_m: int | None, d_s: int | None) -> str:
+    if d_q is None and d_m is None and d_s is None:
+        return "--"
+    parts = []
+    if d_q is not None:
+        parts.append(f"{d_q:+d}Q")
+    if d_m is not None:
+        parts.append(f"{d_m:+d}M")
+    if d_s is not None:
+        parts.append(f"{d_s/1000:+.1f}k" if abs(d_s) >= 1000 else f"{d_s:+d}")
+    return " ".join(parts)
+
+
+def _run_str(run, now: float) -> str:
+    if run is None:
+        return "(no CQ/S&P)"
+    return f"{run.freq_khz:.1f} {run.band}"
+
+
+def _render_opponents(view_op, now: float) -> list[str]:
+    title = (f"OPPONENTS (+/-{view_op.window}, {view_op.category_name}) "
+             f"-- {view_op.source_label}")
+    lines = ["", title, ""]
+    if not view_op.entries:
+        lines.append(f"  {view_op.message or 'no opponents'}")
+        return lines
+    lines.append(f"  {'call':<11} {'QSOs':>6} {'Mults':>6} {'Score':>12}   "
+                 f"{'vs you':<18} run")
+    for e in view_op.entries:
+        mark = ">" if e.is_me else " "
+        name = f"{e.call} (you)" if e.is_me else e.call
+        lines.append(
+            f"{mark} {name:<11} {_num(e.qsos):>6} {_num(e.mults):>6} "
+            f"{_num(e.score):>12}   "
+            f"{_delta_str(e.d_qsos, e.d_mults, e.d_score):<18} "
+            f"{_run_str(e.run, now)}"
+        )
+    if view_op.message:
+        lines.append(f"  ({view_op.message})")
+    return lines
+
+
 def _render_footer() -> list[str]:
     return [
         "",
@@ -307,7 +353,7 @@ def _render_footer() -> list[str]:
 
 
 def format_report(summary: WindowSummary, history: list[WindowSummary],
-                  cfg: RenderConfig) -> str:
+                  cfg: RenderConfig, opponents=None) -> str:
     """Render the full report as plain text over the averaging-window view."""
     view = aggregate_windows(summary, history, cfg.avg_windows)
     run_status = compute_run_status(summary, history, cfg.window_secs,
@@ -318,5 +364,7 @@ def format_report(summary: WindowSummary, history: list[WindowSummary],
     lines += _render_trends(view, history, cfg)
     lines += _render_recommendation(view, history, cfg)
     lines += _render_mm(view, history, cfg, run_status)
+    if opponents is not None and opponents.enabled:
+        lines += _render_opponents(opponents, time.time())
     lines += _render_footer()
     return "\n".join(lines)

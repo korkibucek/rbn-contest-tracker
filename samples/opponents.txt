@@ -1,0 +1,9 @@
+# Manual opponents list -- synthetic test data (not real scores).
+# Format: callsign[, qsos, mults, score]   ('#' starts a comment)
+# Your own call (matching --mycall) provides your totals for ranking.
+GM4DEF, 1500, 420, 1300000
+G4ABC,  1450, 415, 1250000
+MM1E,   1400, 405, 1180000
+GW4ZZZ, 1380, 400, 1120000
+MI0JKL, 1350, 395, 1080000
+M0XYZ,  1300, 390, 1010000

@@ -87,7 +87,7 @@ def _horizon_segments(trends: list[tuple[str, str]], use_unicode: bool) -> Line:
 # --- frame builder ---------------------------------------------------------
 
 def build_frame(summary: WindowSummary, history: list[WindowSummary],
-                cfg: RenderConfig, state: TuiState) -> Frame:
+                cfg: RenderConfig, state: TuiState, opponents=None) -> Frame:
     uc = cfg.use_unicode
     frame: Frame = []
     view = aggregate_windows(summary, history, cfg.avg_windows)
@@ -273,7 +273,57 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
                  f"{rec[1]} ({rec[2]} spotters). Consider a move.", "normal"),
             ])
 
+    # --- opponents leaderboard ---
+    if opponents is not None and opponents.enabled:
+        frame.append([("", "normal")])
+        pm = "±" if uc else "+/-"
+        frame.append([(f"OPPONENTS  ", "hdr"),
+                      (f"{pm}{opponents.window}, {opponents.category_name} {sep} "
+                       f"{opponents.source_label}", "dim")])
+        if not opponents.entries:
+            frame.append([(f"  {opponents.message or 'no opponents'}", "dim")])
+        else:
+            frame.append([(f"  {'call':<11} {'QSOs':>6} {'Mult':>5} "
+                           f"{'Score':>11}  {'vs you':<16} run", "dim")])
+            for e in opponents.entries:
+                _opponent_row(frame, e, uc, state.now)
+            if opponents.message:
+                frame.append([(f"  ({opponents.message})", "dim")])
+
     return frame
+
+
+def _fmt_num(n) -> str:
+    return "?" if n is None else f"{n:,}"
+
+
+def _opponent_row(frame: Frame, e, uc: bool, now: float) -> None:
+    name = f"{e.call} (you)" if e.is_me else e.call
+    name_style = "title" if e.is_me else "accent"
+    # Delta colour: an opponent ahead of you (positive score delta) is a threat.
+    if e.is_me or e.d_score is None:
+        delta_txt = ("—" if uc else "--") if e.is_me else "?"
+        delta_style = "dim"
+    else:
+        ds = e.d_score
+        delta_style = "fading" if ds > 0 else ("good" if ds < 0 else "steady")
+        dq = f"{e.d_qsos:+d}Q " if e.d_qsos is not None else ""
+        dm = f"{e.d_mults:+d}M " if e.d_mults is not None else ""
+        dsr = (f"{ds/1000:+.1f}k" if abs(ds) >= 1000 else f"{ds:+d}")
+        delta_txt = f"{dq}{dm}{dsr}"
+    if e.run is not None:
+        run_txt, run_style = f"{e.run.freq_khz:.1f} {e.run.band}", "good"
+    else:
+        run_txt, run_style = "(no CQ)", "dim"
+    frame.append([
+        ("> " if e.is_me else "  ", name_style),
+        (f"{name:<11} ", name_style),
+        (f"{_fmt_num(e.qsos):>6} ", "normal"),
+        (f"{_fmt_num(e.mults):>5} ", "normal"),
+        (f"{_fmt_num(e.score):>11}  ", "normal"),
+        (f"{delta_txt:<16} ", delta_style),
+        (run_txt, run_style),
+    ])
 
 
 def _legend_text(use_unicode: bool) -> str:
@@ -291,7 +341,8 @@ def flatten_frame(frame: Frame) -> str:
 
 def run_tui(processor, cfg: RenderConfig, state: TuiState, lock,
             get_now=time.time, refresh_secs: float = 1.0,
-            on_commit=None, stop_check=None, pre_render=None) -> None:
+            on_commit=None, stop_check=None, pre_render=None,
+            opponents=None) -> None:
     """Run the curses event loop until 'q' or ``stop_check()`` is true.
 
     ``processor``  : SpotProcessor (filled by a background reader thread)
@@ -323,7 +374,10 @@ def run_tui(processor, cfg: RenderConfig, state: TuiState, lock,
             state.now = now
             if pre_render:
                 pre_render(state)
+            if opponents is not None:
+                opponents.refresh(now)
             if not state.paused:
+                op_view = opponents.view(now) if opponents is not None else None
                 with lock:
                     processor.prune(now)
                     if now >= next_commit:
@@ -333,7 +387,7 @@ def run_tui(processor, cfg: RenderConfig, state: TuiState, lock,
                         next_commit += cfg.window_secs
                     snapshot = processor.snapshot(now)
                     history = list(processor.history)
-                last_frame = build_frame(snapshot, history, cfg, state)
+                last_frame = build_frame(snapshot, history, cfg, state, op_view)
             _paint(stdscr, last_frame)
 
     curses.wrapper(_loop)
