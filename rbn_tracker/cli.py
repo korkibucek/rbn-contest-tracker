@@ -82,9 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--history", type=int, default=5, metavar="N",
                    help="number of windows kept for trend analysis (default 5)")
     p.add_argument("--opponents", choices=["auto", "manual", "off"],
-                   default="auto",
-                   help="opponents leaderboard source (default auto: live "
-                        "scores from contestonlinescore.com)")
+                   default="off",
+                   help="opponents leaderboard source (default off; 'auto' "
+                        "pulls live scores from contestonlinescore.com -- needs "
+                        "--score-url/--contest; 'manual' uses --opponents-file)")
     p.add_argument("--opponents-file", metavar="FILE",
                    help="manual opponents list (callsign[,qsos,mults,score] "
                         "per line); used with --opponents manual")
