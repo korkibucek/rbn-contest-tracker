@@ -253,19 +253,34 @@ class ContestOnlineScoreSource:
     """Auto source: pull the live scoreboard from contestonlinescore.com.
 
     ``url`` overrides the endpoint entirely (use --score-url). Otherwise a
-    contest id must be supplied. ``fetcher`` is injectable for testing.
+    contest id must be supplied.
+
+    Two access modes:
+
+    * **Unauthenticated** -- a plain GET against ``url`` returning JSON. Inject a
+      ``fetcher(url) -> bytes`` for testing.
+    * **Authenticated** -- when ``api_key`` is set, the COS authorization API is
+      used: POST ``/v1/authenticate`` with the key to get a ``session_id``, then
+      fetch scores with that session. The key/session flow is gated entirely on
+      ``api_key`` so it stays dormant (and silent) until you have a key. Inject a
+      ``poster(url, json_body, headers) -> bytes`` for testing.
     """
 
     def __init__(self, category: str, mycall: str, url: str | None = None,
-                 contest: str | None = None, fetcher=None) -> None:
+                 contest: str | None = None, api_key: str | None = None,
+                 fetcher=None, poster=None) -> None:
         self.category = category
         self.mycall = mycall
-        self.url = url or self._default_url(contest)
         self.contest = contest
+        self.api_key = api_key
+        self.url = url or self._default_url(contest)
         self._fetch_bytes = fetcher or self._http_get
+        self._post = poster or self._http_post
+        self._session_id: str | None = None
 
     def label(self) -> str:
-        return "contestonlinescore.com"
+        return ("contestonlinescore.com (API)" if self.api_key
+                else "contestonlinescore.com")
 
     @staticmethod
     def _default_url(contest: str | None) -> str | None:
@@ -283,12 +298,59 @@ class ContestOnlineScoreSource:
         with urllib.request.urlopen(req, timeout=12) as r:
             return r.read()
 
+    @staticmethod
+    def _http_post(url: str, body: dict, headers: dict) -> bytes:
+        data = json.dumps(body).encode()
+        hdrs = {"User-Agent": "rbn-contest-tracker/1.0",
+                "Content-Type": "application/json",
+                "Accept": "application/json", **headers}
+        req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+        with urllib.request.urlopen(req, timeout=12) as r:
+            return r.read()
+
+    # --- authenticated flow ---
+    def _authenticate(self) -> str:
+        """POST the api_key and return a session id (tolerant to field names)."""
+        url = f"{DEFAULT_SCORE_BASE}/v1/authenticate"
+        raw = self._post(url, {"api_key": self.api_key}, {})
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"authenticate did not return JSON ({exc})")
+        if isinstance(data, dict):
+            sid = _first(data, "session_id", "session", "token", "sessionid")
+            if sid:
+                return str(sid)
+        raise RuntimeError("authenticate response had no session id")
+
+    def _scores_url(self) -> str:
+        if self.url:
+            return self.url
+        if self.contest:
+            return f"{DEFAULT_SCORE_BASE}/v1/scores?contest_id={self.contest}"
+        raise RuntimeError("authenticated mode needs --contest or --score-url")
+
+    def _fetch_authenticated(self) -> bytes:
+        if self._session_id is None:
+            self._session_id = self._authenticate()
+        url = self._scores_url()
+        sep = "&" if "?" in url else "?"
+        try:
+            return self._fetch_bytes(f"{url}{sep}session_id={self._session_id}")
+        except Exception:
+            # Session may have expired -- re-authenticate once.
+            self._session_id = self._authenticate()
+            return self._fetch_bytes(f"{url}{sep}session_id={self._session_id}")
+
     def fetch(self) -> list[Opponent]:
-        if not self.url:
-            raise RuntimeError(
-                "no scoreboard URL -- pass --contest ID or --score-url, "
-                "or use --opponents manual")
-        raw = self._fetch_bytes(self.url)
+        if self.api_key:
+            raw = self._fetch_authenticated()
+        else:
+            if not self.url:
+                raise RuntimeError(
+                    "no scoreboard URL -- pass --contest ID or --score-url, "
+                    "set --score-api-key, or use --opponents manual")
+            raw = self._fetch_bytes(self.url)
         text = raw.decode("utf-8", "replace").lstrip("﻿ \t\r\n")
         # A common mistake: pointing --score-url at the human scoreboard *page*
         # (HTML) instead of the JSON/XHR feed it loads behind the scenes.

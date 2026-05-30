@@ -120,6 +120,60 @@ class TestAutoSource(unittest.TestCase):
         with self.assertRaises(Exception):
             src.fetch()
 
+    def test_html_response_gives_actionable_error(self):
+        src = ContestOnlineScoreSource("single", "MM1E", url="http://x",
+            fetcher=lambda u: b"<!DOCTYPE html>\n<html>...")
+        with self.assertRaises(Exception) as ctx:
+            src.fetch()
+        self.assertIn("HTML page", str(ctx.exception))
+
+
+class TestAuthenticatedFlow(unittest.TestCase):
+    def test_authenticate_then_scores(self):
+        posted = []
+
+        def poster(url, body, headers):
+            posted.append((url, body))
+            return json.dumps({"session_id": "SESS123"}).encode()
+
+        def fetcher(url):
+            # The session id must have been threaded onto the scores URL.
+            self.assertIn("session_id=SESS123", url)
+            return json.dumps({"scores": [
+                {"call": "MM1E", "class": "SO", "score": 100, "qsos": 10,
+                 "mults": 5}]}).encode()
+
+        src = ContestOnlineScoreSource("single", "MM1E", contest="69",
+                                       api_key="KEY", fetcher=fetcher,
+                                       poster=poster)
+        opps = src.fetch()
+        self.assertEqual([o.call for o in opps], ["MM1E"])
+        self.assertEqual(posted[0][1], {"api_key": "KEY"})  # key was posted
+        self.assertIn("/v1/authenticate", posted[0][0])
+
+    def test_session_reused_then_reauth_on_failure(self):
+        auth_calls = {"n": 0}
+
+        def poster(url, body, headers):
+            auth_calls["n"] += 1
+            return json.dumps({"session_id": f"S{auth_calls['n']}"}).encode()
+
+        state = {"fail_once": True}
+
+        def fetcher(url):
+            if state["fail_once"]:
+                state["fail_once"] = False
+                raise RuntimeError("session expired")
+            return json.dumps({"scores": [
+                {"call": "MM1E", "class": "SO", "score": 1}]}).encode()
+
+        src = ContestOnlineScoreSource("single", "MM1E", contest="69",
+                                       api_key="KEY", fetcher=fetcher,
+                                       poster=poster)
+        opps = src.fetch()  # first fetch fails -> re-auth -> succeeds
+        self.assertEqual([o.call for o in opps], ["MM1E"])
+        self.assertEqual(auth_calls["n"], 2)  # authenticated twice
+
 
 class TestManagerView(unittest.TestCase):
     def test_deltas_and_run(self):
