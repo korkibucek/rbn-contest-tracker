@@ -10,7 +10,7 @@ import statistics
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-from .bands import band_sort_key
+from .bands import UNKNOWN_BAND, band_sort_key
 from .callsign import same_station
 from .continents import CONTINENTS
 from .spots import Spot
@@ -162,6 +162,10 @@ class SpotProcessor:
         self.history: deque[WindowSummary] = deque(maxlen=max(1, retain))
 
     def add(self, spot: Spot) -> None:
+        # Ignore anything off the HF contest bands (WARC/60m/6m/out-of-band):
+        # band_for() returns "?" for those and they're noise for this tool.
+        if spot.band == UNKNOWN_BAND:
+            return
         if self.min_snr is not None and spot.snr_db < self.min_snr:
             return
         self._buffer.append(spot)
