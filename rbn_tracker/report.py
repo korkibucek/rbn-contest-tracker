@@ -210,7 +210,6 @@ def _render_recommendation(view: WindowSummary,
 
 def _render_run_status(status: RunStatus, open_dx_bands: list[str],
                        cfg: RenderConfig) -> list[str]:
-    me = cfg.mycall
     lines = [f"  RUN [{status.category_name}, {status.max_tx} TX]:"]
     if status.running_bands:
         runs = ", ".join(

@@ -34,17 +34,22 @@ python3 -m rbn_tracker --replay samples/sample_feed.txt --ascii
 When run live in a terminal, the tracker opens a full-screen viewer that
 refreshes in place (~1 s) over a rolling window — no scrolling log to chase.
 
-- **`q`** quit · **`p`** pause/resume the refresh so you can read mid-run.
-- A status bar shows the clock, uptime, connection state, spots/window and the
-  tracked call; panels below show the band×continent matrix, multi-horizon band
-  trends, the DX recommendation, and your own station.
-- It falls back automatically to the classic line report when stdout isn't a
-  TTY (piped/redirected), with `--no-tui`, or with `--once`/`--replay`. Force it
-  with `--tui`.
+- A pinned **header bar** carries the primary status: clock, uptime, connection
+  state, averaging window, spot counts and the tracked call (plus `PAUSED`).
+- Content sits in titled, **bordered panels** — *Band × Continent*, *Band
+  Trends*, *Recommendation*, *Your Station*, and *Opponents* — each with a
+  subtitle and aligned columns so the hierarchy is obvious at a glance.
+- A pinned **footer bar** holds the trend legend and the keyboard hints.
+- **`q`** quit · **`p`** pause/resume the refresh (freezes the data; the layout
+  still adapts on resize).
+- Panels size to the terminal width (clamped ~44–120 cols) and stay aligned at
+  small sizes; it falls back automatically to the classic line report when
+  stdout isn't a TTY (piped/redirected), with `--no-tui`, or with
+  `--once`/`--replay`. Force it with `--tui`.
 
 No third-party packages are required (standard library only) — the viewer is
-built on `curses`. Unicode sparklines/arrows fall back to ASCII automatically
-(or force it with `--ascii`).
+built on `curses`. Unicode box-drawing/sparklines/arrows fall back to ASCII
+automatically (or force it with `--ascii`).
 
 ### macOS deployment (virtualenv)
 

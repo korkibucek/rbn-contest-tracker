@@ -104,6 +104,49 @@ class TestBuildFrame(unittest.TestCase):
             if not uc:
                 text.encode("ascii")  # must not raise
 
+    def test_panels_and_alignment(self):
+        from rbn_tracker.tui import build_footer
+        proc = _proc_with_data()
+        cfg = RenderConfig(mycall="MM1E", use_unicode=True, window_secs=60)
+        width = 84
+        frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
+                            TuiState(now=60), None, width=width)
+        text = flatten_frame(frame)
+        # bordered panels present
+        self.assertIn("┌", text)
+        self.assertIn("└", text)
+        self.assertIn("│", text)
+        # every framed line (not the header bar / blank spacers) is exactly the
+        # requested width -> borders line up.
+        for line in frame:
+            s = "".join(t for t, _ in line)
+            if s.startswith(" RBN") or not s.strip():
+                continue
+            self.assertEqual(len(s), width, f"misaligned: {s!r}")
+        footer = "".join(t for t, _ in build_footer(cfg, TuiState(now=60), True))
+        self.assertIn("[q]", footer)
+        self.assertIn("[p]", footer)
+
+    def test_ascii_panels_are_pure_ascii(self):
+        proc = _proc_with_data()
+        cfg = RenderConfig(mycall="MM1E", use_unicode=False, window_secs=60)
+        frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
+                            TuiState(now=60), None, width=80)
+        text = flatten_frame(frame)
+        text.encode("ascii")  # must not raise
+        self.assertIn("+", text)  # ascii box corners
+        self.assertIn("|", text)  # ascii vertical border
+
+    def test_narrow_width_stays_aligned(self):
+        proc = _proc_with_data()
+        cfg = RenderConfig(mycall="MM1E", use_unicode=True, window_secs=60)
+        frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
+                            TuiState(now=60), None, width=46)
+        widths = {len("".join(t for t, _ in line)) for line in frame
+                  if "".join(t for t, _ in line).strip()
+                  and not "".join(t for t, _ in line).startswith(" RBN")}
+        self.assertEqual(widths, {46})
+
     def test_ascii_mode_empty_state_is_pure_ascii(self):
         # The "no DX activity" / "not spotted" branches must also stay ASCII.
         proc = SpotProcessor("MM1E", 60, 5)

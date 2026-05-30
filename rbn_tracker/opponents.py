@@ -24,7 +24,6 @@ from __future__ import annotations
 import json
 import logging
 import threading
-import time
 import urllib.request
 from dataclasses import dataclass, field
 
