@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 
+from . import __version__
 from .csvout import CsvWriter
 from .feed import ReplayFeed, TelnetFeed
 from .opponents import (
@@ -116,6 +117,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-tui", action="store_true",
                    help="force the classic scrolling line report")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
+    p.add_argument("--version", action="version",
+                   version=f"%(prog)s {__version__}")
     return p
 
 
