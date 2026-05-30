@@ -7,7 +7,7 @@ and adjust.
 from __future__ import annotations
 
 import statistics
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 
 from .bands import UNKNOWN_BAND, band_sort_key

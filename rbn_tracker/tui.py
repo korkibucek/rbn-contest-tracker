@@ -124,13 +124,17 @@ def _panel(title: Line, subtitle: str, body: list[Line], width: int,
     b = _box(uc)
     out: list[Line] = []
 
-    prefix = f"{b['tl']}{b['h']} "
-    title_plain = "".join(t for t, _ in title)
+    # Top border interior (between the corners) is built to exactly width-2 so
+    # the box always lines up, clipping the title/subtitle on narrow terminals.
     sub = f" {b['h']} {subtitle} " if subtitle else f"{b['h']}"
-    used = len(prefix) + len(title_plain) + len(sub)
-    fill = max(0, width - used - 1)
-    out.append([(prefix, "border")] + list(title)
-               + [(sub, "dim"), (b["h"] * fill, "border"), (b["tr"], "border")])
+    interior: Line = [(f"{b['h']} ", "border")] + list(title) + [(sub, "dim")]
+    target = width - 2
+    ilen = _seg_len(interior)
+    if ilen < target:
+        interior.append((b["h"] * (target - ilen), "border"))
+    else:
+        interior = _fit(interior, target)
+    out.append([(b["tl"], "border")] + interior + [(b["tr"], "border")])
 
     inner = width - 4
     for line in body:
@@ -210,7 +214,8 @@ def _trends_body(history, cfg, bands, uc) -> list[Line]:
 
 def _rec_body(view, history, cfg, scored, span, uc) -> list[Line]:
     if not scored:
-        return [[(f"no DX reach in the last {span} — EU-only or thin "
+        d = "—" if uc else "-"
+        return [[(f"no DX reach in the last {span} {d} EU-only or thin "
                   "coverage; watch the trends.", "dim")]]
     top = scored[0]
     bc = top.best_cont or "DX"
@@ -243,6 +248,7 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
                                     cfg.category_key)
     open_dx_bands = [r.band for r in scored] if scored else []
     arrow_to = "→" if uc else "->"
+    dash = "—" if uc else "-"
 
     run_line: Line = [(f"RUN  [{run_status.category_name}, "
                        f"{run_status.max_tx} TX]   ", "dim"),
@@ -261,13 +267,13 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
 
     if run_status.max_tx == 1 and run_status.running_count > 1:
         rows.append([(f"  running {run_status.running_count} bands at once "
-                      "(single TX) — band change in progress?", "warn")])
+                      f"(single TX) {dash} band change in progress?", "warn")])
     for frm, to in run_status.qsy:
         rows.append([("  band change  ", "dim"),
                      (f"{frm} {arrow_to} {to}", "new"), ("  (run moved)", "dim")])
     for band, mins in run_status.sp_or_off:
         rows.append([(f"  {band}  ", "dim"),
-                     (f"no CQ for ~{mins}m — gone S&P or off this band",
+                     (f"no CQ for ~{mins}m {dash} gone S&P or off this band",
                       "fading")])
     if run_status.max_tx >= 2:
         rows.append([(f"  transmitters in use  "
@@ -284,8 +290,8 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
     rows.append(_hr(width, uc))
 
     if not view.mm_spotted:
-        rows.append([(f"not spotted in the last {span} — check you're calling "
-                      "CQ / band may be dead where you are.", "warn")])
+        rows.append([(f"not spotted in the last {span} {dash} check you're "
+                      "calling CQ / band may be dead where you are.", "warn")])
         return rows
 
     for band in view.mm_bands():

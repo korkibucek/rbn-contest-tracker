@@ -8,7 +8,6 @@ from rbn_tracker.analysis import (
     coverage_factor,
     mm_current_band,
     per_window_reach,
-    recommended_dx_band,
     score_bands,
     smoothed_reach,
 )
