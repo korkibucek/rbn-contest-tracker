@@ -289,7 +289,18 @@ class ContestOnlineScoreSource:
                 "no scoreboard URL -- pass --contest ID or --score-url, "
                 "or use --opponents manual")
         raw = self._fetch_bytes(self.url)
-        data = json.loads(raw)
+        text = raw.decode("utf-8", "replace").lstrip("﻿ \t\r\n")
+        # A common mistake: pointing --score-url at the human scoreboard *page*
+        # (HTML) instead of the JSON/XHR feed it loads behind the scenes.
+        if text[:1] in ("<",) or text[:9].lower().startswith("<!doctype"):
+            raise RuntimeError(
+                "got an HTML page, not a JSON feed -- point --score-url at the "
+                "data/XHR endpoint (browser DevTools -> Network -> Fetch/XHR), "
+                "or use --opponents manual")
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"response was not JSON ({exc})") from exc
         opponents = parse_score_records(data)
         # Keep my own row plus same-category rivals (rows with no category are
         # kept too, since not every feed labels every station).
