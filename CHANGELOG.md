@@ -25,6 +25,14 @@ internal APIs** without a major-version bump.
   can only change deliberately. The CLI is treated as public API under SemVer
   from 1.0.0.
 
+### Fixed
+
+- TUI panels (the RECOMMENDATION box and others) no longer misalign in
+  terminals that render ambiguous-width glyphs — box drawing, arrows, sparkline
+  blocks — as two columns. The renderer is now display-column-aware and
+  auto-detects such terminals; `RBN_AMBIGUOUS_WIDTH=wide|narrow` overrides the
+  detection.
+
 ### Changed
 
 - **CLI (breaking):** `--mycall` is now **required** in all modes, and

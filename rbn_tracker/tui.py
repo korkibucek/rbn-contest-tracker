@@ -14,6 +14,7 @@ via :func:`flatten_frame`. No third-party dependencies; degrades to ASCII.
 from __future__ import annotations
 
 import time
+import unicodedata
 from dataclasses import dataclass, field
 
 from .analysis import (
@@ -88,24 +89,133 @@ def _fmt_num(n) -> str:
     return "?" if n is None else f"{n:,}"
 
 
+# Whether the terminal renders East-Asian *Ambiguous*-width characters (which
+# include the box-drawing glyphs, arrows, sparkline blocks, middle dot, etc.) as
+# two columns instead of one. Most terminals draw them as one; some (commonly
+# with a "treat ambiguous-width as double-width" setting) draw them as two,
+# which throws off any layout that assumes one cell per character. Default off;
+# the curses painter probes the real terminal and sets it (see
+# :func:`set_ambiguous_width`), and ``RBN_AMBIGUOUS_WIDTH`` can force it.
+_AMBIGUOUS_WIDE = False
+
+
+def set_ambiguous_width(wide: bool) -> None:
+    """Tell the renderer whether ambiguous-width chars occupy two columns."""
+    global _AMBIGUOUS_WIDE
+    _AMBIGUOUS_WIDE = wide
+
+
+def char_width(ch: str) -> int:
+    """Display width of a single character, in terminal columns (0, 1 or 2)."""
+    if unicodedata.combining(ch):
+        return 0
+    eaw = unicodedata.east_asian_width(ch)
+    if eaw in ("W", "F"):
+        return 2
+    if eaw == "A":
+        return 2 if _AMBIGUOUS_WIDE else 1
+    return 1
+
+
+def text_width(s: str) -> int:
+    """Display width of a string, in terminal columns."""
+    return sum(char_width(c) for c in s)
+
+
 def _seg_len(line: Line) -> int:
-    return sum(len(t) for t, _ in line)
+    return sum(text_width(t) for t, _ in line)
+
+
+def _clip(text: str, cols: int) -> tuple[str, int]:
+    """Take a prefix of ``text`` fitting in ``cols`` columns; return (prefix, used).
+
+    A trailing wide character that would overflow by one column is dropped, so
+    the prefix never exceeds ``cols``.
+    """
+    out = []
+    used = 0
+    for ch in text:
+        w = char_width(ch)
+        if used + w > cols:
+            break
+        out.append(ch)
+        used += w
+    return "".join(out), used
 
 
 def _fit(line: Line, target: int) -> Line:
-    """Clip/pad a line's segments to exactly ``target`` visible characters."""
+    """Clip/pad a line's segments to exactly ``target`` display columns."""
     out: Line = []
     used = 0
     for text, style in line:
         if used >= target:
             break
-        take = text[: target - used]
+        take, w = _clip(text, target - used)
         if take:
             out.append((take, style))
-            used += len(take)
+            used += w
     if used < target:
         out.append((" " * (target - used), "normal"))
     return out
+
+
+def _hfill(ch: str, cols: int, style: str) -> Line:
+    """A run of border char ``ch`` spanning exactly ``cols`` columns.
+
+    If ``ch`` is double-width and ``cols`` is odd, the last column is a space so
+    the total stays exact.
+    """
+    cw = char_width(ch) or 1
+    n = cols // cw
+    rem = cols - n * cw
+    segs: Line = [(ch * n, style)]
+    if rem:
+        segs.append((" " * rem, style))
+    return segs
+
+
+def _pad(s: str, cols: int, align: str = "<") -> str:
+    """Pad/clip ``s`` to exactly ``cols`` display columns (column-aware ljust/rjust)."""
+    s, used = _clip(s, cols)
+    gap = cols - used
+    if gap <= 0:
+        return s
+    return s + " " * gap if align == "<" else " " * gap + s
+
+
+def _inner_cols(width: int, uc: bool) -> int:
+    """Columns available inside a panel body (between the border + 1 space pads)."""
+    return width - 2 * char_width("│" if uc else "|") - 2
+
+
+def _detect_ambiguous_wide(stdscr) -> bool:
+    """Probe the real terminal: does it draw an ambiguous-width glyph as 2 cols?
+
+    ``RBN_AMBIGUOUS_WIDTH=wide|narrow`` forces the answer. Otherwise we print a
+    box-drawing glyph off-screen and measure how far the cursor advanced.
+    """
+    import os
+
+    forced = os.environ.get("RBN_AMBIGUOUS_WIDTH", "").strip().lower()
+    if forced in ("wide", "double", "2"):
+        return True
+    if forced in ("narrow", "single", "1"):
+        return False
+
+    import curses
+
+    try:
+        max_y, max_x = stdscr.getmaxyx()
+        if max_x < 3 or max_y < 1:
+            return False
+        probe_y = max_y - 1
+        stdscr.addstr(probe_y, 0, "─")  # EAW=Ambiguous box-drawing glyph
+        _, x = stdscr.getyx()
+        stdscr.move(probe_y, 0)
+        stdscr.clrtoeol()
+        return x >= 2
+    except curses.error:
+        return False
 
 
 def _box(uc: bool) -> dict:
@@ -122,32 +232,36 @@ def _panel(title: Line, subtitle: str, body: list[Line], width: int,
            uc: bool) -> list[Line]:
     """Wrap ``body`` lines in a titled border box ``width`` columns wide."""
     b = _box(uc)
+    cw = char_width(b["v"])  # 1, or 2 in a wide-ambiguous terminal
     out: list[Line] = []
 
-    # Top border interior (between the corners) is built to exactly width-2 so
-    # the box always lines up, clipping the title/subtitle on narrow terminals.
+    # All sizing is in display columns so the box lines up regardless of how the
+    # terminal renders ambiguous-width box-drawing glyphs. The interior between
+    # the corners must span (width - 2*corner_width) columns; the body sits
+    # inside one border + one space on each side.
+    target = width - 2 * cw
+    inner = _inner_cols(width, uc)
     sub = f" {b['h']} {subtitle} " if subtitle else f"{b['h']}"
     interior: Line = [(f"{b['h']} ", "border")] + list(title) + [(sub, "dim")]
-    target = width - 2
     ilen = _seg_len(interior)
     if ilen < target:
-        interior.append((b["h"] * (target - ilen), "border"))
+        interior += _hfill(b["h"], target - ilen, "border")
     else:
         interior = _fit(interior, target)
     out.append([(b["tl"], "border")] + interior + [(b["tr"], "border")])
 
-    inner = width - 4
     for line in body:
         out.append([(b["v"] + " ", "border")] + _fit(line, inner)
                    + [(" " + b["v"], "border")])
 
-    out.append([(b["bl"] + b["h"] * (width - 2) + b["br"], "border")])
+    out.append([(b["bl"], "border")] + _hfill(b["h"], target, "border")
+               + [(b["br"], "border")])
     return out
 
 
 def _hr(width: int, uc: bool) -> Line:
     """A thin inner divider line for use inside a panel body."""
-    return [(("┄" if uc else "-") * (width - 4), "dim")]
+    return _hfill("┄" if uc else "-", _inner_cols(width, uc), "dim")
 
 
 def _horizon_segments(trends: list[tuple[str, str]], use_unicode: bool) -> Line:
@@ -164,7 +278,7 @@ def _horizon_segments(trends: list[tuple[str, str]], use_unicode: bool) -> Line:
 
 def _matrix_body(view, history, cfg, bands, span, uc, width) -> list[Line]:
     dot = "·" if uc else "."
-    inner = width - 4
+    inner = _inner_cols(width, uc)
     band_w, now_w = 5, 10
     col_w = max(7, (inner - band_w - now_w) // len(MATRIX_COLS))
 
@@ -188,10 +302,10 @@ def _matrix_body(view, history, cfg, bands, span, uc, width) -> list[Line]:
                 style = "good" if cont != "EU" else "normal"
                 line.append((f"{txt:>{col_w}}", style))
             else:
-                line.append((f"{dot:>{col_w}}", "dim"))
+                line.append((_pad(dot, col_w, ">"), "dim"))
         nt = band_horizon_trends(history, band, cfg.window_secs)[0][1]
         now_plain = f"{arrow(nt, uc)} {nt}"
-        line.append((" " * max(1, now_w - len(now_plain)), "dim"))
+        line.append((" " * max(1, now_w - text_width(now_plain)), "dim"))
         line.append((arrow(nt, uc), _trend_style(nt)))
         line.append((f" {nt}", _trend_style(nt)))
         rows.append(line)
@@ -206,7 +320,7 @@ def _trends_body(history, cfg, bands, uc) -> list[Line]:
         series = band_spotter_series(history, band)
         spark = sparkline(series, uc)
         trends = band_horizon_trends(history, band, cfg.window_secs)
-        line: Line = [(f"{band:<5} ", "accent"), (f"{spark:<{SPARK_W}} ", "normal")]
+        line: Line = [(f"{band:<5} ", "accent"), (_pad(spark, SPARK_W, "<") + " ", "normal")]
         line += _horizon_segments(trends, uc)
         rows.append(line)
     return rows
@@ -301,7 +415,7 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
         line: Line = [
             (f"{band:<4} ", "accent"),
             (f"{total_sp:>2} spotters  ", "good"),
-            (f"{sparkline(series, uc):<10} ", "normal"),
+            (_pad(sparkline(series, uc), 10, "<") + " ", "normal"),
         ]
         line += _horizon_segments(trends, uc)
         rows.append(line)
@@ -481,6 +595,9 @@ def run_tui(processor, cfg: RenderConfig, state: TuiState, lock,
         curses.curs_set(0)
         stdscr.timeout(int(refresh_secs * 1000))
         _init_colors()
+        # Adapt the layout to terminals that render ambiguous-width glyphs (box
+        # drawing, arrows, sparklines) as two columns, so the boxes line up.
+        set_ambiguous_width(cfg.use_unicode and _detect_ambiguous_wide(stdscr))
         next_commit = get_now() + cfg.window_secs
         frozen = None  # (snapshot, history, op_view) -- kept while paused
         while True:
@@ -589,12 +706,14 @@ def _paint_bar(stdscr, row: int, line: Line, max_x: int) -> None:
     for text, style in line:
         if x >= max_x - 1:
             break
-        chunk = text[: max(0, max_x - 1 - x)]
+        chunk, w = _clip(text, max_x - 1 - x)
+        if not chunk:
+            continue
         try:
             stdscr.addstr(row, x, chunk, _attr_for(style) | curses.A_REVERSE)
         except curses.error:
             pass
-        x += len(chunk)
+        x += w
     if x < max_x - 1:
         try:
             stdscr.addstr(row, x, " " * (max_x - 1 - x),
@@ -620,12 +739,14 @@ def _paint(stdscr, frame: Frame, footer: Line | None = None) -> None:
         for text, style in line:
             if x >= max_x - 1:
                 break
-            chunk = text[: max(0, max_x - 1 - x)]
+            chunk, w = _clip(text, max_x - 1 - x)
+            if not chunk:
+                continue
             try:
                 stdscr.addstr(y, x, chunk, _attr_for(style))
             except curses.error:
                 pass
-            x += len(chunk)
+            x += w
 
     if footer is not None and max_y >= 2:
         _paint_bar(stdscr, max_y - 1, footer, max_x)
