@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rbn-contest-tracker"
+description = "Live RBN propagation / band-recommendation viewer for HF CW contesting"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "korkibucek" }]
+keywords = ["ham-radio", "amateur-radio", "contest", "reverse-beacon-network", "rbn", "propagation", "cw"]
+dynamic = ["version"]
+# No third-party runtime dependencies: standard library only.
+dependencies = []
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console :: Curses",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Ham Radio",
+]
+
+[project.urls]
+Homepage = "https://github.com/korkibucek/rbn-contest-tracker"
+Repository = "https://github.com/korkibucek/rbn-contest-tracker"
+Issues = "https://github.com/korkibucek/rbn-contest-tracker/issues"
+Changelog = "https://github.com/korkibucek/rbn-contest-tracker/blob/main/CHANGELOG.md"
+
+[project.scripts]
+rbn-contest-tracker = "rbn_tracker.cli:main"
+
+[tool.setuptools]
+packages = ["rbn_tracker"]
+
+[tool.setuptools.dynamic]
+version = { attr = "rbn_tracker.__version__" }
