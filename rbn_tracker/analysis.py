@@ -302,6 +302,86 @@ QSY_NONE = "none"     # not worth interrupting the operator
 QSY_WATCH = "watch"   # a possible opening; worth keeping an eye on
 QSY_MOVE = "qsy"      # strong evidence, clearly beats the current run
 
+# Why a WATCH/MOVE was issued -- lets the renderer/operator tell a genuine run
+# move from "interesting but not a run target right now".
+KIND_RUN = "run"          # a sensible band to run for QSOs now
+KIND_BUILD = "build"      # evidence still building toward a run move
+KIND_MULT = "mult"        # propagation present but off its run window -> S&P/mult
+KIND_UNUSUAL = "unusual"  # exceptional evidence overriding a weak time-of-day prior
+
+
+# ---------------------------------------------------------------------------
+# Contest context: target viability.
+#
+# Raw reach answers "is the band open to continent X?". It does NOT answer "is X
+# a sensible place to *run* for contest QSOs right now?". A 1800z opening to AS
+# from the UK can show high reach yet be useless for running -- Japan is ~0300
+# local, the audience is asleep. The model below scores each (continent, UTC)
+# for *run viability* from the target's own local time and how big a run target
+# the continent is, independent of home region. It is a general, data-driven
+# prior (tables below), not a pile of "never AS at 1800z" special cases.
+# ---------------------------------------------------------------------------
+
+# Representative whole-hour UTC offset for the bulk of each continent's contest
+# population (NA -> US central, AS -> CJK, OC -> VK/ZL, ...). Used to turn UTC
+# into the target audience's local clock hour.
+_CONT_TZ_OFFSET = {"NA": -6, "SA": -3, "EU": 1, "AF": 1, "AS": 8, "OC": 10}
+
+# How big a *run* target each continent is in general (activity density). NA/EU
+# are huge, AS large, the rest progressively smaller. This biases run advice
+# toward populous targets without encoding any time rule.
+_CONT_RUN_WEIGHT = {"NA": 1.0, "EU": 1.0, "AS": 0.8, "SA": 0.5, "OC": 0.4,
+                    "AF": 0.3}
+
+# "Audience awake and operating" by the target's *local* clock hour (0..23).
+# Low overnight (02-05), rising through the morning, peaking in the evening.
+_HOURLY_ACTIVITY = (
+    0.30, 0.15, 0.07, 0.05, 0.07, 0.15,   # 00-05 overnight
+    0.35, 0.55, 0.70, 0.80, 0.85, 0.85,   # 06-11 morning
+    0.85, 0.85, 0.88, 0.90, 0.92, 0.95,   # 12-17 afternoon
+    1.00, 1.00, 0.95, 0.80, 0.60, 0.45,   # 18-23 evening
+)
+
+
+@dataclass(frozen=True)
+class ContestContext:
+    """Operating context for turning raw propagation into contest run advice.
+
+    Defaults describe a generic HF-CW contest cohort and work for any home
+    region (the viability of running *into* a continent depends on that
+    continent's local time and size, not on where you are). Swap the tables to
+    retune for a specific contest/region; ``home_region`` is the probe cohort's
+    continent (e.g. "EU" for MM1E) and is available for region-specific tuning.
+    """
+
+    home_region: str = "EU"
+    tz_offset: dict = field(default_factory=lambda: dict(_CONT_TZ_OFFSET))
+    run_weight: dict = field(default_factory=lambda: dict(_CONT_RUN_WEIGHT))
+    hourly_activity: tuple = _HOURLY_ACTIVITY
+
+
+DEFAULT_CONTEXT = ContestContext()
+
+
+def _target_local_hour(cont: str, utc_hour: int, context: ContestContext) -> int:
+    return int(utc_hour + context.tz_offset.get(cont, 0)) % 24
+
+
+def target_viability(cont: str, utc_hour: int | None,
+                     context: ContestContext = DEFAULT_CONTEXT) -> float:
+    """0..1 score for how sensible it is to *run* into ``cont`` at ``utc_hour``.
+
+    Combines the target audience's local-time activity (are they awake and
+    operating?) with how big a run target the continent is. Unknown time -> 1.0
+    (no contest-awareness, falls back to pure propagation behaviour).
+    """
+    if utc_hour is None:
+        return 1.0
+    local = _target_local_hour(cont, utc_hour, context)
+    activity = context.hourly_activity[local % len(context.hourly_activity)]
+    weight = context.run_weight.get(cont, 0.5)
+    return max(0.0, min(1.0, activity * weight))
+
 
 @dataclass(frozen=True)
 class QsyThresholds:
@@ -322,6 +402,10 @@ class QsyThresholds:
     good_current_extra_margin: float = 0.15  # ...so demand more before moving
     low_bands: tuple = ("160m", "80m", "40m")
     low_band_daytime_factor: float = 0.5  # cautious daytime prior for low bands
+    # --- contest-context gates ---
+    min_run_viability: float = 0.35   # target viability needed to advise a RUN
+    exceptional_confidence: float = 0.85  # evidence that overrides a weak window
+    exceptional_margin: float = 0.45      # ...and the margin it must also clear
 
 
 QSY_THRESHOLDS = QsyThresholds()
@@ -342,6 +426,7 @@ class BandEvidence:
     trend: str
     confidence: float     # 0..1 overall evidence quality
     meets_minimums: bool = False  # every hard quality gate satisfied
+    viability: float = 1.0        # 0..1 contest run-target viability (time/region)
     reasons: list = field(default_factory=list)
 
 
@@ -355,6 +440,8 @@ class QsyAdvice:
     current_reach: float
     message: str                    # "" when tier is QSY_NONE
     reason: str                     # why it was accepted or rejected
+    kind: str = ""                  # KIND_RUN / KIND_BUILD / KIND_MULT / KIND_UNUSUAL
+    viability: float = 1.0          # candidate's target viability
 
 
 def _ramp(x: float, full: float) -> float:
@@ -403,8 +490,16 @@ def band_evidence(view: WindowSummary, history: list[WindowSummary], band: str,
                   cont: str, avg_windows: int,
                   thresholds: QsyThresholds = QSY_THRESHOLDS,
                   utc_hour: int | None = None,
-                  alpha: float = REACH_EWMA_ALPHA) -> BandEvidence:
-    """Score the evidence quality (0..1 confidence) for a band/continent."""
+                  alpha: float = REACH_EWMA_ALPHA,
+                  context: ContestContext = DEFAULT_CONTEXT) -> BandEvidence:
+    """Score the evidence quality (0..1 confidence) for a band/continent.
+
+    ``confidence`` measures *propagation evidence* only (sample size, volume,
+    skimmer diversity, SNR, persistence); ``viability`` is the separate
+    contest-context run-target score (target local time x continent size). The
+    two are kept distinct so the UI can show "propagation present" independently
+    of "worth running now".
+    """
     t = thresholds
     cell = view.cell(band, cont)
     reach = smoothed_reach(history, band, cont, alpha)
@@ -450,14 +545,16 @@ def band_evidence(view: WindowSummary, history: list[WindowSummary], band: str,
         and median_snr >= t.min_median_snr
     )
 
+    viability = target_viability(cont, utc_hour, context)
+
     reasons = [
         f"{active_uk} active", f"{spots} spots", f"{skimmers} skimmers",
         f"median {'-' if median_snr is None else round(median_snr)}dB",
-        f"{windows}w persistence",
+        f"{windows}w persistence", f"viability {viability:.2f}",
     ]
     return BandEvidence(band, cont, reach, active_uk, spots, skimmers,
                         median_snr, windows, trend, round(confidence, 3),
-                        meets_minimums, reasons)
+                        meets_minimums, round(viability, 3), reasons)
 
 
 def _current_band_reach(history: list[WindowSummary], band: str | None,
@@ -469,28 +566,59 @@ def _current_band_reach(history: list[WindowSummary], band: str | None,
                default=0.0)
 
 
+def _current_run_quality(history: list[WindowSummary], band: str | None,
+                         utc_hour: int | None, context: ContestContext,
+                         alpha: float) -> float:
+    """Best *run quality* (reach x target viability) on the current band.
+
+    This is what a candidate must beat to justify a run move -- comparing
+    run-quality to run-quality means a current band that only "reaches" a dead-
+    window continent (e.g. 20m into overnight AS) is correctly seen as a poor
+    run, not a strong one to defend.
+    """
+    if not band:
+        return 0.0
+    return max((smoothed_reach(history, band, c, alpha)
+                * target_viability(c, utc_hour, context)
+                for c in DX_CONTINENTS), default=0.0)
+
+
 def qsy_advice(view: WindowSummary, history: list[WindowSummary],
                current_band: str | None, avg_windows: int,
                thresholds: QsyThresholds = QSY_THRESHOLDS,
                utc_hour: int | None = None,
-               alpha: float = REACH_EWMA_ALPHA) -> QsyAdvice:
+               alpha: float = REACH_EWMA_ALPHA,
+               context: ContestContext = DEFAULT_CONTEXT) -> QsyAdvice:
     """Decide whether to advise the operator to QSY, and how strongly.
 
-    Separates raw ranking (which band has the reach) from action advice (is the
-    evidence good enough, and clearly better than the current run). Returns a
-    :class:`QsyAdvice` whose ``tier`` is QSY_NONE / QSY_WATCH / QSY_MOVE.
+    Three layers, deliberately separate:
+
+    1. **Raw reach** -- ``smoothed_reach`` (unchanged): is the band open to X?
+    2. **Propagation evidence** -- ``band_evidence.confidence``: is the opening
+       real and well-corroborated?
+    3. **Target viability** -- ``band_evidence.viability``: is X a sensible
+       contest *run* target at this UTC, given its local time and size?
+
+    The candidate is chosen on the combined ``reach x confidence x viability``
+    score, so a high-reach but out-of-window target (15m AS at 1800z) loses to a
+    sensible one (NA) and, even if it is the only opening, is reported as a
+    "mult/watch" opportunity rather than a run QSY. Exceptional evidence can
+    still override a weak viability prior, but only at high confidence/margin and
+    with the message clearly flagging it as unusual.
     """
     t = thresholds
     if utc_hour is None and view.end_time:
         utc_hour = time.gmtime(view.end_time).tm_hour
 
     cur_reach = _current_band_reach(history, current_band, alpha)
+    # Run-quality (reach x viability) is what a move must beat, not raw reach.
+    cur_quality = _current_run_quality(history, current_band, utc_hour,
+                                       context, alpha)
 
-    # Candidate selection is itself evidence-weighted, not reach-ranked: for
-    # each DX band/continent we score reach x confidence, so a thin 87%-from-two-
-    # spots cell loses to a well-corroborated one. This is what stops the engine
-    # nominating 40m off a sliver of data in the first place.
-    best = None  # (reach*confidence, BandEvidence)
+    # Score every DX candidate by reach x confidence x viability. Viability now
+    # shapes *selection* too: an out-of-window target won't be nominated over a
+    # sensible run target unless its propagation evidence is overwhelming.
+    best = None  # (combined_score, BandEvidence)
     for band in view.active_bands():
         if band == current_band:
             continue
@@ -499,8 +627,10 @@ def qsy_advice(view: WindowSummary, history: list[WindowSummary],
             if not cell or cell.count == 0:
                 continue
             ev = band_evidence(view, history, band, cont, avg_windows,
-                               t, utc_hour, alpha)
-            value = ev.reach * ev.confidence
+                               t, utc_hour, alpha, context)
+            # Floor viability so an exceptional opening can still surface (and be
+            # labelled unusual) rather than being multiplied to zero.
+            value = ev.reach * ev.confidence * max(0.15, ev.viability)
             if best is None or value > best[0]:
                 best = (value, ev)
 
@@ -513,24 +643,64 @@ def qsy_advice(view: WindowSummary, history: list[WindowSummary],
         return QsyAdvice(QSY_NONE, ev, current_band, cur_reach, "",
                          "not running a single band")
 
-    margin = ev.reach - cur_reach
+    # A run move must beat the current run on *run-quality* (reach x viability);
+    # off-window "info" advice is judged on raw reach, since its viability is
+    # intentionally low and a run-quality margin would always be ~0.
+    cand_quality = ev.reach * ev.viability
+    quality_margin = cand_quality - cur_quality
+    reach_margin = ev.reach - cur_reach
     required = t.margin
-    if cur_reach >= t.good_current_reach:
+    if cur_quality >= t.good_current_reach:
         required += t.good_current_extra_margin  # current run is already good
-    detail = (f"confidence {ev.confidence:.2f}; margin {round(margin * 100)}pp "
-              f"(need {round(required * 100)}); " + ", ".join(ev.reasons))
+    viable = ev.viability >= t.min_run_viability
+    detail = (f"confidence {ev.confidence:.2f}; viability {ev.viability:.2f}; "
+              f"run-quality {cand_quality:.2f} vs {cur_quality:.2f} "
+              f"(need +{required:.2f}); " + ", ".join(ev.reasons))
 
-    cand_pct, cur_pct = round(ev.reach * 100), round(cur_reach * 100)
-    if (ev.meets_minimums and ev.confidence >= t.move_confidence
-            and margin >= max(required, t.strong_margin)):
-        msg = (f"QSY: {ev.band} is clearly outperforming your {current_band} "
-               f"run into {ev.cont} ({cand_pct}% vs {cur_pct}% reach).")
-        return QsyAdvice(QSY_MOVE, ev, current_band, cur_reach, msg, detail)
-    if (ev.confidence >= t.watch_confidence and margin >= required
-            and ev.trend in (RISING, NEW)):
-        msg = (f"Watch {ev.band}: improving {ev.cont} reach, but evidence is "
-               f"still building ({ev.spots} spots / {ev.skimmers} skimmers).")
-        return QsyAdvice(QSY_WATCH, ev, current_band, cur_reach, msg, detail)
+    cand_pct = round(ev.reach * 100)
+    evidence_ok = ev.meets_minimums and ev.confidence >= t.move_confidence
+
+    # Strong RUN move: good evidence, a sensible run target, and clearly better
+    # run-quality than the current band.
+    if (evidence_ok and viable
+            and quality_margin >= max(required, t.strong_margin)):
+        msg = (f"QSY: {ev.band} {ev.cont} is the better run target now "
+               f"({cand_pct}% reach, strong evidence) vs your {current_band} "
+               f"run.")
+        return QsyAdvice(QSY_MOVE, ev, current_band, cur_reach, msg, detail,
+                         KIND_RUN, ev.viability)
+
+    # Out-of-window target. Only override the viability prior with a run move
+    # when the propagation evidence is genuinely exceptional -- and label it.
+    if not viable and evidence_ok:
+        if (ev.confidence >= t.exceptional_confidence
+                and reach_margin >= t.exceptional_margin):
+            msg = (f"QSY (unusual): {ev.band} {ev.cont} is exceptionally strong "
+                   f"for this UTC ({cand_pct}% reach) -- normally a weak run "
+                   f"window, so verify before committing.")
+            return QsyAdvice(QSY_MOVE, ev, current_band, cur_reach, msg, detail,
+                             KIND_UNUSUAL, ev.viability)
+        msg = (f"Mult opportunity: {ev.band} {ev.cont} open ({cand_pct}% reach) "
+               f"but a weak run target at this UTC -- S&P/mults, not a run move.")
+        return QsyAdvice(QSY_WATCH, ev, current_band, cur_reach, msg, detail,
+                         KIND_MULT, ev.viability)
+
+    # Building evidence on a sensible target -> a quiet watch.
+    if (viable and ev.confidence >= t.watch_confidence
+            and quality_margin >= required and ev.trend in (RISING, NEW)):
+        msg = (f"Watch {ev.band} {ev.cont}: improving reach, evidence still "
+               f"building ({ev.spots} spots / {ev.skimmers} skimmers).")
+        return QsyAdvice(QSY_WATCH, ev, current_band, cur_reach, msg, detail,
+                         KIND_BUILD, ev.viability)
+
+    # Open but off its run window -> note it as info, never as a run move.
+    if (not viable and ev.confidence >= t.watch_confidence
+            and reach_margin >= required):
+        msg = (f"Watch {ev.band} {ev.cont}: propagation present, but low run "
+               f"priority at this UTC -- prefer a daytime run target.")
+        return QsyAdvice(QSY_WATCH, ev, current_band, cur_reach, msg, detail,
+                         KIND_MULT, ev.viability)
+
     return QsyAdvice(QSY_NONE, ev, current_band, cur_reach, "", detail)
 
 

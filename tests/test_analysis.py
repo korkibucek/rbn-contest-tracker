@@ -316,5 +316,131 @@ class QsyEvidenceTest(unittest.TestCase):
         self.assertEqual(ev.active_uk, 8)
 
 
+class TargetViabilityTest(unittest.TestCase):
+    """Contest-context layer: QSY advice must respect target run windows, not
+    just raw reach. Probe cohort is UK/IE (MM1E) unless noted."""
+
+    AVG = 5
+
+    def _advice(self, spec, current, hour, context=None):
+        hist = _qsy_history(spec, 6)
+        kw = {"utc_hour": hour}
+        if context is not None:
+            kw["context"] = context
+        return A.qsy_advice(hist[-1], hist, current, self.AVG, **kw)
+
+    def _spec(self, *cells):
+        return {(b, c): args for (b, c, args) in cells}
+
+    # --- the viability model itself ---------------------------------------
+
+    def test_viability_table_matches_run_windows(self):
+        # NA: best in the UK evening (18z ~ noon US); AS: best UK morning
+        # (00-12z ~ AS daytime), dead by 18z (~03 local CJK).
+        self.assertGreater(A.target_viability("NA", 18), A.target_viability("AS", 18))
+        self.assertGreater(A.target_viability("AS", 0), A.target_viability("AS", 18))
+        # Asia deep-overnight is strongly downgraded.
+        self.assertLess(A.target_viability("AS", 18), 0.2)
+        # Unknown time -> no contest-awareness (pure propagation fallback).
+        self.assertEqual(A.target_viability("AS", None), 1.0)
+
+    # --- the reported bug -------------------------------------------------
+
+    def test_evening_asia_not_promoted_as_run_qsy(self):
+        # 1800z, running 20m AS (50%), 15m AS higher reach (77%). Must NOT be a
+        # strong run QSY -- AS is ~03 local. Surfaces as a mult/info note.
+        spec = self._spec(
+            ("20m", "AS", (_g(8), _sk("K", 6), [12] * 6, 30)),
+            ("15m", "AS", (_g(10), _sk("K", 8), [14] * 9, 40)),
+        )
+        adv = self._advice(spec, "20m", hour=18)
+        self.assertNotEqual(adv.kind, A.KIND_RUN)
+        self.assertIn(adv.tier, (A.QSY_WATCH, A.QSY_NONE))
+        if adv.message:
+            self.assertNotIn("clearly outperforming", adv.message)
+
+    def test_evening_prefers_na_over_higher_reach_asia(self):
+        # Both AS (high reach, dead window) and a solid NA opening present at
+        # 1800z -> the run move is into NA, not AS.
+        spec = self._spec(
+            ("20m", "AS", (_g(8), _sk("K", 6), [12] * 6, 30)),
+            ("15m", "AS", (_g(10), _sk("K", 8), [14] * 9, 40)),
+            ("15m", "NA", (_g(10), _sk("N", 8), [15] * 9, 40)),
+        )
+        adv = self._advice(spec, "20m", hour=18)
+        self.assertEqual(adv.tier, A.QSY_MOVE)
+        self.assertEqual(adv.kind, A.KIND_RUN)
+        self.assertEqual(adv.candidate.cont, "NA")
+
+    # --- valid windows ----------------------------------------------------
+
+    def test_morning_asia_is_valid_run_target(self):
+        # 0000z: AS ~08 local, a real run window. Strong evidence -> run QSY.
+        spec = self._spec(
+            ("20m", "EU", ({"G1", "G2"}, {"D1", "D2"}, [12] * 4, 8)),
+            ("15m", "AS", (_g(10), _sk("K", 8), [15] * 9, 40)),
+        )
+        adv = self._advice(spec, "20m", hour=0)
+        self.assertEqual(adv.tier, A.QSY_MOVE)
+        self.assertEqual(adv.kind, A.KIND_RUN)
+        self.assertEqual(adv.candidate.cont, "AS")
+
+    def test_evening_na_scores_high_with_good_evidence(self):
+        spec = self._spec(
+            ("20m", "EU", ({"G1", "G2"}, {"D1", "D2"}, [12] * 4, 8)),
+            ("15m", "NA", (_g(10), _sk("N", 8), [15] * 9, 40)),
+        )
+        adv = self._advice(spec, "20m", hour=18)
+        self.assertEqual(adv.tier, A.QSY_MOVE)
+        self.assertEqual(adv.kind, A.KIND_RUN)
+        self.assertEqual(adv.candidate.cont, "NA")
+
+    # --- raw data still visible; exceptional override ---------------------
+
+    def test_weak_window_downgrades_but_keeps_raw_propagation(self):
+        # The candidate evidence (reach/confidence) is unchanged by viability --
+        # only the advice tier is downgraded. Raw propagation stays inspectable.
+        spec = self._spec(("15m", "AS", (_g(10), _sk("K", 8), [14] * 9, 40)))
+        adv = self._advice(spec, "20m", hour=18)
+        self.assertEqual(adv.candidate.cont, "AS")
+        self.assertGreater(adv.candidate.reach, 0.5)        # reach intact
+        self.assertGreater(adv.candidate.confidence, 0.6)   # evidence intact
+        self.assertLess(adv.candidate.viability, 0.2)       # but not viable
+        self.assertNotEqual(adv.kind, A.KIND_RUN)
+
+    def test_exceptional_evidence_overrides_weak_window_but_labels_unusual(self):
+        # Overwhelming AS evidence at 1800z can still trigger a move, but it is
+        # flagged unusual, never "clearly outperforming".
+        spec = self._spec(
+            ("20m", "EU", ({"G1", "G2"}, {"D1", "D2"}, [8] * 3, 6)),
+            ("15m", "AS", (_g(12), _sk("K", 12), [25] * 20, 60)),
+        )
+        adv = self._advice(spec, "20m", hour=18)
+        self.assertEqual(adv.tier, A.QSY_MOVE)
+        self.assertEqual(adv.kind, A.KIND_UNUSUAL)
+        self.assertIn("unusual", adv.message.lower())
+
+    # --- works for a non-UK probe cohort ----------------------------------
+
+    def test_context_is_region_configurable(self):
+        # The same machinery works for any cohort: a JA-centric context tuned so
+        # NA is the prime *morning* JA run target. Viability follows the tables,
+        # not a hard-coded UK assumption.
+        ja_ctx = A.ContestContext(
+            home_region="AS",
+            tz_offset={"NA": -6, "EU": 1, "AS": 8, "SA": -3, "OC": 10, "AF": 1},
+        )
+        # NA at 22z is ~16 local US -> a strong run target for a JA station.
+        spec = self._spec(
+            ("20m", "EU", ({"G1", "G2"}, {"D1", "D2"}, [12] * 4, 8)),
+            ("15m", "NA", (_g(10), _sk("N", 8), [15] * 9, 40)),
+        )
+        adv = self._advice(spec, "20m", hour=22, context=ja_ctx)
+        self.assertEqual(adv.tier, A.QSY_MOVE)
+        self.assertEqual(adv.candidate.cont, "NA")
+        # And the context object carries the cohort region.
+        self.assertEqual(ja_ctx.home_region, "AS")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -121,6 +121,53 @@ Three refinements:
   `COVERAGE_BOOST_CAP` and referenced to `COVERAGE_REF_SKIMMERS`. Shown as
   `cov~N`.
 
+## QSY advice: four layers, kept separate
+
+Telling an operator to **leave a run** is a higher bar than "this band is open".
+The Your Station panel's QSY line is built from four distinct layers
+(`rbn_tracker/analysis.py`), so the app can show propagation truthfully without
+nagging you onto the wrong band:
+
+1. **Raw reach** — `smoothed_reach`: *is the band open to continent X?* Pure
+   propagation, exactly as in the matrix and recommendation panels.
+2. **Propagation evidence** — `band_evidence().confidence` (0–1): *is the
+   opening real and well-corroborated?* The geometric mean of sub-scores for
+   active stations, spot volume, distinct skimmers, median SNR (weak-only ≈ 0)
+   and window persistence, with hard minimums (`meets_minimums`). A high reach %
+   from two spots heard by one skimmer scores low.
+3. **Target viability** — `target_viability(cont, utc_hour)` (0–1): *is X a
+   sensible contest **run** target right now?* Derived from the target
+   audience's **local time** (`_HOURLY_ACTIVITY` indexed by the continent's
+   `_CONT_TZ_OFFSET`) and how big a run target the continent is
+   (`_CONT_RUN_WEIGHT`). Asia at 1800z UTC (~03:00 in Japan) scores ~0.06;
+   North America at 1800z scores ~0.85. This is a **general, data-driven prior**,
+   not a hard rule like "never AS at 1800z".
+4. **Operator advice** — `qsy_advice()` combines them. The candidate is selected
+   on `reach × confidence × viability`, and a **run** move is compared on
+   *run-quality* (`reach × viability`), so a current band that only reaches a
+   dead-window continent isn't mistaken for a strong run to defend.
+
+The result is tiered **and** labelled with a `kind`:
+
+| Tier / kind | When | Example wording |
+|-------------|------|-----------------|
+| `qsy` / **run** | Strong evidence, a sensible run target now, clearly better run-quality | `>> QSY: 15m NA is the better run target now (97% reach, strong evidence) vs your 20m run.` |
+| `qsy` / **unusual** | Out-of-window target but *exceptional* evidence overrides the prior | `>> QSY (unusual): 15m AS is exceptionally strong for this UTC … verify before committing.` |
+| `watch` / **mult** | Open, real, but a weak run target at this UTC | `- Mult opportunity: 15m AS open (77% reach) but a weak run target at this UTC — S&P/mults, not a run move.` |
+| `watch` / **build** | Sensible target, rising, evidence still building | `- Watch 15m NA: improving reach, evidence still building.` |
+| `none` | Anything weaker | *(no interruption)* |
+
+So at 1800z from MM1E, a high-reach 15m **AS** opening is shown as a *mult
+opportunity*, while a solid **NA** opening is the run QSY — and the phrase
+"clearly outperforming" only appears for a genuinely strong, in-window move.
+
+**Region awareness.** The probe cohort's home continent is derived from
+`--mycall` (`ContestContext.home_region`), and the whole model is a
+`ContestContext` dataclass — swap `tz_offset` / `run_weight` / `hourly_activity`
+to retune for a specific contest or a non-UK cohort. Run-advice gates live in
+`QsyThresholds` (`min_run_viability`, `exceptional_confidence`,
+`exceptional_margin`, plus the evidence minimums), with conservative defaults.
+
 ## Tunable constants
 
 These live at the top of [`rbn_tracker/processing.py`](../rbn_tracker/processing.py)

@@ -27,6 +27,20 @@ internal APIs** without a major-version bump.
 
 ### Changed
 
+- **QSY advice is now contest-aware, not just propagation-aware.** Added a
+  *target-viability* layer (`target_viability` / `ContestContext` in
+  `analysis.py`) that scores how sensible it is to *run* into a continent at a
+  given UTC, from the target audience's local time and run-target size. Operator
+  advice now combines raw reach × propagation evidence × viability, and a run
+  **QSY** is compared on run-quality (reach × viability) — so a high-reach but
+  out-of-window opening (e.g. 15m into Asia at 1800z UTC, ~03:00 in Japan) is
+  surfaced as a *mult opportunity*, not a "clearly outperforming" run move,
+  while North America is correctly preferred for a UK evening run. Advice now
+  carries a `kind` (run / unusual / mult / build) and the wording reflects it;
+  exceptional evidence can still override the prior but is labelled "unusual".
+  The home/probe region is derived from `--mycall` and the whole model is a
+  configurable `ContestContext`. Raw reach is unchanged and stays visible in the
+  matrix/recommendation panels.
 - Redesigned the **RECOMMENDATION** panel for readability: a labelled headline
   (`Top DX band` / `Best reach` / `Reach` / `Trend`) separated by a divider from
   a proper fixed-width table with column headings — **Target, Band, Reach,
