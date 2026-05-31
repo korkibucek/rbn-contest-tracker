@@ -51,7 +51,10 @@ Roughly in priority order. Items are intentionally not dated.
       entry point; builds an sdist + wheel; installable via `pip`/`pipx`.
 - [x] **CI** — GitHub Actions runs the test suite on Python 3.10–3.13, plus a
       pyflakes lint and a package-build smoke test.
-- [ ] **Publish to PyPI** so `pip install rbn-contest-tracker` works.
+- [ ] **Publish to PyPI** so `pip install rbn-contest-tracker` works. The
+      release automation is in place (`.github/workflows/publish.yml` uploads on
+      a GitHub Release); the remaining step is the first actual publish (add the
+      `PYPI_API_TOKEN` secret and cut a release).
 - [ ] **Resolve opponents `auto`**: either verify and harden the
       contestonlinescore.com integration against the live API (and document the
       exact response shape), or keep it clearly experimental/opt-in with
