@@ -7,14 +7,14 @@ For the full flag reference and the maths behind the recommendation, see
 ## Running
 
 ```bash
-# Live full-screen viewer (default when stdout is a terminal)
-python3 -m rbn_tracker --mycall MM1E
+# Live full-screen viewer (default when stdout is a terminal); use your own call
+python3 -m rbn_tracker --callsign M0TTT --mycall M0TTT
 
 # Classic scrolling line report (one block per window)
-python3 -m rbn_tracker --mycall MM1E --no-tui
+python3 -m rbn_tracker --callsign M0TTT --mycall M0TTT --no-tui
 
-# Offline, against the bundled synthetic feed
-python3 -m rbn_tracker --replay samples/sample_feed.txt --ascii
+# Offline, against the bundled synthetic feed (no login needed; --mycall still required)
+python3 -m rbn_tracker --replay samples/sample_feed.txt --mycall MM1E --ascii
 ```
 
 The viewer is used automatically when standard output is an interactive

@@ -10,10 +10,10 @@
 # Usage:
 #   ./deploy/install_macos.sh [--with-rich] [--python /path/to/python3]
 #
-# After install, run it with:
-#   ./deploy/run.sh                       # uses defaults (login M0TTT, track MM1E)
-#   ./deploy/run.sh --csv contest.csv
-#   ./deploy/run.sh --replay samples/sample_feed.txt --ascii
+# After install, run it with (use your own call for --callsign/--mycall):
+#   ./deploy/run.sh --callsign M0TTT --mycall M0TTT
+#   ./deploy/run.sh --callsign M0TTT --mycall M0TTT --csv contest.csv
+#   ./deploy/run.sh --replay samples/sample_feed.txt --mycall MM1E --ascii
 # ...or directly:  .venv/bin/python -m rbn_tracker --help
 
 set -euo pipefail
@@ -100,10 +100,10 @@ cat <<EOF
 
 ${GREEN}${BOLD}Install complete and verified.${RESET}
 
-Run the tracker:
-  ${BOLD}./deploy/run.sh${RESET}                                  live feed, defaults (login M0TTT, track MM1E)
-  ${BOLD}./deploy/run.sh --mycall MM1E --csv contest.csv${RESET}  with CSV logging
-  ${BOLD}./deploy/run.sh --replay samples/sample_feed.txt${RESET} offline demo
+Run the tracker (use your own call for --callsign/--mycall):
+  ${BOLD}./deploy/run.sh --callsign M0TTT --mycall M0TTT${RESET}              live feed
+  ${BOLD}./deploy/run.sh --callsign M0TTT --mycall M0TTT --csv contest.csv${RESET}  with CSV logging
+  ${BOLD}./deploy/run.sh --replay samples/sample_feed.txt --mycall MM1E${RESET}     offline demo
 
 Or call Python directly:
   ${BOLD}$VENV_PY -m rbn_tracker --help${RESET}

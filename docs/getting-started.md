@@ -39,7 +39,7 @@ pipx install .                     # isolated, on your PATH (recommended)
 Then:
 
 ```bash
-rbn-contest-tracker --mycall MM1E
+rbn-contest-tracker --callsign M0TTT --mycall M0TTT   # use your own call
 ```
 
 Once published to PyPI, `pip install rbn-contest-tracker` / `pipx install
@@ -53,7 +53,7 @@ keeps the install isolated from the system / Homebrew / python.org Pythons:
 ```bash
 ./deploy/install_macos.sh                 # create .venv and verify via tests
 ./deploy/install_macos.sh --python /path  # force a specific interpreter
-./deploy/run.sh --mycall MM1E             # launch; args pass through to the CLI
+./deploy/run.sh --callsign M0TTT --mycall M0TTT   # launch; args pass through to the CLI
 ```
 
 `install_macos.sh`:
@@ -81,7 +81,7 @@ viewer needs a `curses`-capable terminal.
 The repository ships a synthetic feed so you can see the full interface offline:
 
 ```bash
-python3 -m rbn_tracker --replay samples/sample_feed.txt --ascii
+python3 -m rbn_tracker --replay samples/sample_feed.txt --mycall MM1E --ascii
 ```
 
 `--replay` reads spot lines from a file instead of connecting, and drives a
@@ -93,18 +93,22 @@ propagation.
 To print a single window and exit (useful in scripts/CI):
 
 ```bash
-python3 -m rbn_tracker --replay samples/sample_feed.txt --once --ascii
+python3 -m rbn_tracker --replay samples/sample_feed.txt --mycall MM1E --once --ascii
 ```
+
+(`--mycall` is required in every mode; `--callsign` is only needed for a live
+connection, so it is omitted for `--replay`.)
 
 ## First live run
 
 ```bash
-python3 -m rbn_tracker --callsign M0TTT --mycall MM1E
+python3 -m rbn_tracker --callsign M0TTT --mycall M0TTT   # use your own call
 ```
 
 - `--callsign` is the call used to **log in** to the RBN feed (any valid-looking
-  call works; it identifies your session to the aggregator).
-- `--mycall` is the station the **"Your Station"** panel tracks.
+  call works; it identifies your session to the aggregator). **Required** for a
+  live connection.
+- `--mycall` is the station the **"Your Station"** panel tracks. **Required.**
 
 On connect you'll see log lines on stderr (`connecting…`, `sent login
 callsign…`), then the full-screen viewer once the first data arrives. The first

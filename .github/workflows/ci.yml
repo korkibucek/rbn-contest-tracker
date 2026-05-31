@@ -48,7 +48,7 @@ jobs:
         run: |
           pip install dist/*.whl
           rbn-contest-tracker --version
-          rbn-contest-tracker --replay samples/sample_feed.txt --once --ascii > /dev/null
+          rbn-contest-tracker --replay samples/sample_feed.txt --mycall MM1E --once --ascii > /dev/null
       - uses: actions/upload-artifact@v4
         with:
           name: dist
