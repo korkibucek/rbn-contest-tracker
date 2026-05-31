@@ -326,32 +326,130 @@ def _trends_body(history, cfg, bands, uc) -> list[Line]:
     return rows
 
 
-def _rec_body(view, history, cfg, scored, span, uc) -> list[Line]:
+def _chip_lines(chips: list[tuple[str, Line]], inner: int) -> list[Line]:
+    """Lay out ``label: value`` chips onto as few lines as fit ``inner`` cols.
+
+    Chips flow left-to-right and wrap to a new line when they would overflow, so
+    the headline stays readable and stacks cleanly on narrow terminals.
+    """
+    lines: list[Line] = []
+    cur: Line = []
+    curw = 0
+    for label, value in chips:
+        chip: Line = [(f"{label}: ", "dim")] + value
+        w = _seg_len(chip)
+        if cur and curw + 3 + w > inner:
+            lines.append(cur)
+            cur, curw = [], 0
+        if cur:
+            cur.append(("   ", "dim"))
+            curw += 3
+        cur += chip
+        curw += w
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+# RECOMMENDATION table columns: (key, header, align, drop-priority).
+# Higher drop-priority is shed first when the terminal is too narrow; the first
+# three columns (priority 0) are always kept.
+_REC_COLS = [
+    ("target", "Target", "<", 0),
+    ("band", "Band", "<", 0),
+    ("reach", "Reach", "<", 0),
+    ("trend", "Trend", "<", 1),
+    ("spots", "Spots", ">", 2),
+    ("snr", "Med dB", ">", 3),
+    ("cov", "Coverage", ">", 4),
+]
+
+
+def _rec_body(view, history, cfg, scored, span, uc, width) -> list[Line]:
     if not scored:
         d = "—" if uc else "-"
         return [[(f"no DX reach in the last {span} {d} EU-only or thin "
                   "coverage; watch the trends.", "dim")]]
+    inner = _inner_cols(width, uc)
+
+    # --- headline: the single best DX band, every field labelled ----------
     top = scored[0]
     bc = top.best_cont or "DX"
-    rows: list[Line] = [[
-        ("TOP DX BAND  ", "dim"), (top.band, "good"),
-        (f"   best reach {bc} {top.best_reach*100:.0f}% of {top.active_uk} "
-         "active   ", "normal"),
-        (top.trend, _trend_style(top.trend)),
-    ]]
+    head = _chip_lines([
+        ("Top DX band", [(top.band, "good")]),
+        ("Best reach", [(bc, "good")]),
+        ("Reach", [(f"{top.best_reach * 100:.0f}% of {top.active_uk} active",
+                    "normal")]),
+        ("Trend", [(top.trend, _trend_style(top.trend))]),
+    ], inner)
+    rows: list[Line] = list(head)
+    rows.append(_hr(width, uc))
+
+    # --- supporting table: best band per continent ------------------------
+    data: list[tuple[str, object]] = []
+    closed: list[str] = []
     for cont, best in best_band_per_continent(view, history,
                                               cfg.avg_windows).items():
         if best is None:
-            rows.append([(f"  {cont}  ", "dim"), ("closed", "fading")])
-            continue
-        rows.append([
-            (f"  {cont}  ", "dim"), (f"{best.band:<4}", "accent"),
-            (f" {best.reach*100:>3.0f}% of {best.active_uk:<3}", "good"),
-            (f"  {best.count}sp  med {_fmt_snr(best.median_snr)}  "
-             f"cov~{best.coverage}  ", "normal"),
-            (arrow(best.trend, uc), _trend_style(best.trend)),
-            (f" {best.trend}", _trend_style(best.trend)),
-        ])
+            closed.append(cont)
+        else:
+            data.append((cont, best))
+
+    def cell(key, cont, best) -> str:
+        if key == "target":
+            return cont
+        if key == "band":
+            return best.band
+        if key == "reach":
+            return f"{best.reach * 100:.0f}% of {best.active_uk}"
+        if key == "trend":
+            return best.trend
+        if key == "spots":
+            return str(best.count)
+        if key == "snr":
+            return "-" if best.median_snr is None else f"{best.median_snr:+.0f}"
+        return f"~{best.coverage}"
+
+    style = {"target": "dim", "band": "accent", "reach": "good",
+             "spots": "normal", "snr": "normal", "cov": "normal"}
+
+    if data:
+        cols = list(_REC_COLS)
+        # Width each kept column to its header / widest value, then drop the
+        # lowest-priority columns until the row fits the panel.
+        def widths(cs):
+            return {k: max(len(h), *(len(cell(k, c, b)) for c, b in data))
+                    for (k, h, _a, _p) in cs}
+
+        def total(cs, w):
+            return sum(w[k] for (k, *_r) in cs) + 2 * (len(cs) - 1)
+
+        w = widths(cols)
+        while total(cols, w) > inner and any(p > 0 for *_x, p in cols):
+            drop = max((c for c in cols if c[3] > 0), key=lambda c: c[3])
+            cols.remove(drop)
+            w = widths(cols)
+
+        def render_row(cells: dict, sty) -> Line:
+            line: Line = []
+            for i, (k, _h, align, _p) in enumerate(cols):
+                if i:
+                    line.append(("  ", "dim"))
+                s = sty(k) if callable(sty) else sty
+                line.append((_pad(cells[k], w[k], align), s))
+            return line
+
+        header_cells = {k: h for (k, h, _a, _p) in cols}
+        rows.append(render_row(header_cells, "dim"))
+        for cont, best in data:
+            cells = {k: cell(k, cont, best) for (k, *_r) in cols}
+            row_style = (lambda k, b=best: _trend_style(b.trend)
+                         if k == "trend" else style[k])
+            rows.append(render_row(cells, row_style))
+
+    if closed:
+        d = "—" if uc else "-"
+        rows.append([(f"closed {d} ", "dim"), (", ".join(closed), "fading")])
     return rows
 
 
@@ -556,7 +654,8 @@ def build_frame(summary: WindowSummary, history: list[WindowSummary],
     frame += _panel([("RECOMMENDATION", "hdr")],
                     f"work DX · reach over last {span}" if uc
                     else f"work DX - reach over last {span}",
-                    _rec_body(view, history, cfg, scored, span, uc), width, uc)
+                    _rec_body(view, history, cfg, scored, span, uc, width),
+                    width, uc)
     frame.append([("", "normal")])
 
     frame += _panel([("YOUR STATION  ", "hdr"), (cfg.mycall, "accent")],

@@ -204,5 +204,62 @@ class TestDisplayWidth(unittest.TestCase):
         flatten_frame(frame).encode("ascii")  # must not raise
 
 
+def _rec_panel_lines(frame):
+    """The plain-text lines of the RECOMMENDATION panel (incl. its borders)."""
+    lines = ["".join(t for t, _ in line) for line in frame]
+    start = next(i for i, s in enumerate(lines) if "RECOMMENDATION" in s)
+    end = next(i for i in range(start + 1, len(lines)) if lines[i][:1] in "└+")
+    return lines[start:end + 1]
+
+
+class TestRecommendationPanel(unittest.TestCase):
+    """The RECOMMENDATION panel: labelled headline + a fixed-width table."""
+
+    def _frame(self, width, uc=True):
+        proc = _proc_with_data()  # NA skimmers hear UK calls -> DX reach into NA
+        cfg = RenderConfig(mycall="MM1E", use_unicode=uc, window_secs=60)
+        return build_frame(proc.snapshot(60), list(proc.history), cfg,
+                           TuiState(now=60), None, width=width)
+
+    def test_headline_fields_are_labelled(self):
+        body = "\n".join(_rec_panel_lines(self._frame(84)))
+        for label in ("Top DX band:", "Best reach:", "Reach:", "Trend:"):
+            self.assertIn(label, body)
+
+    def test_table_has_column_headings(self):
+        lines = _rec_panel_lines(self._frame(84))
+        header = next(l for l in lines if "Target" in l and "Band" in l)
+        for col in ("Target", "Band", "Reach", "Trend", "Spots", "Med dB",
+                    "Coverage"):
+            self.assertIn(col, header)
+
+    def test_table_columns_align_with_header(self):
+        # Each value sits at the same start column as its heading: the data row
+        # right after the header puts its band under 'Band'.
+        lines = _rec_panel_lines(self._frame(84))
+        hi = next(i for i, l in enumerate(lines) if "Target" in l and "Band" in l)
+        header, first_row = lines[hi], lines[hi + 1]
+        self.assertEqual(header.index("Band"), first_row.index("15m"))
+
+    def test_narrow_terminal_drops_low_priority_columns(self):
+        # The wide layout shows Coverage; a narrow one sheds it but keeps the
+        # essential Target/Band/Reach/Trend columns.
+        wide = next(l for l in _rec_panel_lines(self._frame(84)) if "Target" in l)
+        self.assertIn("Coverage", wide)
+        narrow = next(l for l in _rec_panel_lines(self._frame(50)) if "Target" in l)
+        self.assertNotIn("Coverage", narrow)
+        for col in ("Target", "Band", "Reach", "Trend"):
+            self.assertIn(col, narrow)
+
+    def test_closed_continents_summarised(self):
+        # _proc_with_data only opens NA, so the rest are reported as closed.
+        body = "\n".join(_rec_panel_lines(self._frame(84)))
+        self.assertIn("closed", body)
+
+    def test_ascii_panel_is_pure_ascii(self):
+        body = "\n".join(_rec_panel_lines(self._frame(84, uc=False)))
+        body.encode("ascii")  # must not raise
+
+
 if __name__ == "__main__":
     unittest.main()
