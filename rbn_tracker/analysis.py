@@ -6,7 +6,8 @@ can never drift apart in how they rank bands or pick the QSY suggestion.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 
 from .bands import band_sort_key
 from .processing import (
@@ -281,6 +282,256 @@ def recommended_dx_band(view: WindowSummary, history: list[WindowSummary],
     if best is None:
         return None
     return best[1], best[2], best[3]
+
+
+# ---------------------------------------------------------------------------
+# QSY decision quality: an evidence model + tiered, gated advice.
+#
+# Raw band *ranking* (score_bands / best_band_per_continent) answers "where is
+# the reach?". Operator-facing *QSY advice* must answer a harder question: "is
+# the evidence good enough, and clearly better than where I am, to be worth
+# leaving a run?". A reach of 87% from two spots into a continent with one
+# listening skimmer is not. The model below turns the raw cell metrics into a
+# 0..1 confidence score (with a human-readable reason), then only escalates to
+# an action when confidence AND the margin over the current band clear
+# conservative thresholds. Reach percentage alone never triggers a QSY.
+# ---------------------------------------------------------------------------
+
+# Tiers of operator-facing advice, in increasing strength.
+QSY_NONE = "none"     # not worth interrupting the operator
+QSY_WATCH = "watch"   # a possible opening; worth keeping an eye on
+QSY_MOVE = "qsy"      # strong evidence, clearly beats the current run
+
+
+@dataclass(frozen=True)
+class QsyThresholds:
+    """Tunable evidence gates for QSY advice. Defaults are deliberately
+    conservative for live contest use -- better a missed nudge than yanking an
+    operator off a good run on thin data. Tweak here (single source of truth)."""
+
+    min_active: int = 3        # active UK/IE stations on the candidate band
+    min_spots: int = 6         # absolute spot count in the candidate cell
+    min_skimmers: int = 3      # distinct skimmers hearing the candidate
+    min_median_snr: float = 6.0  # dB the median spot is judged "solid" at
+    min_windows: int = 3       # windows the opening must have persisted over
+    margin: float = 0.15       # candidate reach must beat current by this (frac)
+    strong_margin: float = 0.25     # extra margin a full QSY needs
+    move_confidence: float = 0.60   # confidence needed for a QSY tier
+    watch_confidence: float = 0.35  # confidence needed for a WATCH tier
+    good_current_reach: float = 0.50      # "your run is already good" threshold
+    good_current_extra_margin: float = 0.15  # ...so demand more before moving
+    low_bands: tuple = ("160m", "80m", "40m")
+    low_band_daytime_factor: float = 0.5  # cautious daytime prior for low bands
+
+
+QSY_THRESHOLDS = QsyThresholds()
+
+
+@dataclass
+class BandEvidence:
+    """Quality of the evidence behind a (band, continent) DX opportunity."""
+
+    band: str
+    cont: str
+    reach: float
+    active_uk: int
+    spots: int
+    skimmers: int
+    median_snr: float | None
+    windows: int          # windows this cell has persisted over
+    trend: str
+    confidence: float     # 0..1 overall evidence quality
+    meets_minimums: bool = False  # every hard quality gate satisfied
+    reasons: list = field(default_factory=list)
+
+
+@dataclass
+class QsyAdvice:
+    """Operator-facing advice: a tier, the supporting evidence and a message."""
+
+    tier: str                       # QSY_NONE / QSY_WATCH / QSY_MOVE
+    candidate: BandEvidence | None
+    current_band: str | None
+    current_reach: float
+    message: str                    # "" when tier is QSY_NONE
+    reason: str                     # why it was accepted or rejected
+
+
+def _ramp(x: float, full: float) -> float:
+    """0 at x<=0, rising linearly to 1 by x>=full (clamped to 0..1)."""
+    if full <= 0:
+        return 1.0
+    return max(0.0, min(1.0, x / full))
+
+
+def _snr_score(median_snr: float | None, solid: float) -> float:
+    """0 for missing/very weak signals, ~0.5 around ``solid`` dB, 1 when strong.
+
+    Rejects "weak-only" evidence: a cell whose spots are all near the noise
+    floor scores ~0 however many there are.
+    """
+    if median_snr is None:
+        return 0.0
+    # ramp centred on `solid`, full width +/- ~12 dB
+    return max(0.0, min(1.0, (median_snr - (solid - 12)) / 24.0))
+
+
+def _daylight_strength(utc_hour: int | None) -> float:
+    """Crude UK/IE daylight factor: 0 at night, 1 near solar noon (~12 UTC).
+
+    Used only as a *cautious prior*, not a hard rule -- it scales confidence,
+    so genuinely strong low-band evidence can still get through.
+    """
+    if utc_hour is None:
+        return 0.0
+    x = (utc_hour - 12) / 6.0          # +/-1 at 06:00 / 18:00 UTC
+    return max(0.0, min(1.0, 1.0 - x * x))
+
+
+def _band_window_count(history: list[WindowSummary], band: str,
+                       cont: str) -> int:
+    """How many committed windows actually had spots in this (band, cont)."""
+    n = 0
+    for w in history:
+        cell = w.cell(band, cont)
+        if cell and cell.count > 0:
+            n += 1
+    return n
+
+
+def band_evidence(view: WindowSummary, history: list[WindowSummary], band: str,
+                  cont: str, avg_windows: int,
+                  thresholds: QsyThresholds = QSY_THRESHOLDS,
+                  utc_hour: int | None = None,
+                  alpha: float = REACH_EWMA_ALPHA) -> BandEvidence:
+    """Score the evidence quality (0..1 confidence) for a band/continent."""
+    t = thresholds
+    cell = view.cell(band, cont)
+    reach = smoothed_reach(history, band, cont, alpha)
+    active_uk = view.band_active_uk(band)
+    spots = cell.count if cell else 0
+    skimmers = cell.distinct_spotters if cell else 0
+    median_snr = cell.median_snr if cell else None
+    windows = _band_window_count(history, band, cont)
+    trend = classify_horizon(band_spotter_series(history, band), avg_windows)
+
+    # Smooth sub-scores: meeting a minimum scores ~0.5, comfortably exceeding
+    # it approaches 1. Any single weak factor drags the geometric mean down --
+    # which is the point: a tiny denominator, a lone skimmer or weak-only spots
+    # should each be enough to withhold a confident recommendation.
+    sample = _ramp(active_uk, t.min_active * 2)
+    volume = _ramp(spots, t.min_spots * 2)
+    diversity = _ramp(skimmers, t.min_skimmers * 2)
+    persistence = _ramp(windows, t.min_windows * 2)
+    signal = _snr_score(median_snr, t.min_median_snr)
+
+    factors = [sample, volume, diversity, signal, persistence]
+    product = 1.0
+    for f in factors:
+        product *= f
+    confidence = product ** (1.0 / len(factors)) if product > 0 else 0.0
+
+    # Cautious daytime prior for low bands (D-layer absorption kills 160/80/40
+    # DX in daylight). Scales confidence rather than hard-blocking.
+    if band in t.low_bands:
+        dl = _daylight_strength(utc_hour)
+        confidence *= 1.0 - (1.0 - t.low_band_daytime_factor) * dl
+
+    # Hard quality gates: a confident *move* requires EVERY minimum to be met,
+    # so no single strong dimension (e.g. high reach) can compensate for a fatal
+    # weakness (one skimmer, two stations, near-noise signals, a brief blip).
+    # The smooth confidence above is for ranking/display; this is the floor.
+    meets_minimums = (
+        active_uk >= t.min_active
+        and spots >= t.min_spots
+        and skimmers >= t.min_skimmers
+        and windows >= t.min_windows
+        and median_snr is not None
+        and median_snr >= t.min_median_snr
+    )
+
+    reasons = [
+        f"{active_uk} active", f"{spots} spots", f"{skimmers} skimmers",
+        f"median {'-' if median_snr is None else round(median_snr)}dB",
+        f"{windows}w persistence",
+    ]
+    return BandEvidence(band, cont, reach, active_uk, spots, skimmers,
+                        median_snr, windows, trend, round(confidence, 3),
+                        meets_minimums, reasons)
+
+
+def _current_band_reach(history: list[WindowSummary], band: str | None,
+                        alpha: float) -> float:
+    """Best smoothed DX reach on the band the operator is currently running."""
+    if not band:
+        return 0.0
+    return max((smoothed_reach(history, band, c, alpha) for c in DX_CONTINENTS),
+               default=0.0)
+
+
+def qsy_advice(view: WindowSummary, history: list[WindowSummary],
+               current_band: str | None, avg_windows: int,
+               thresholds: QsyThresholds = QSY_THRESHOLDS,
+               utc_hour: int | None = None,
+               alpha: float = REACH_EWMA_ALPHA) -> QsyAdvice:
+    """Decide whether to advise the operator to QSY, and how strongly.
+
+    Separates raw ranking (which band has the reach) from action advice (is the
+    evidence good enough, and clearly better than the current run). Returns a
+    :class:`QsyAdvice` whose ``tier`` is QSY_NONE / QSY_WATCH / QSY_MOVE.
+    """
+    t = thresholds
+    if utc_hour is None and view.end_time:
+        utc_hour = time.gmtime(view.end_time).tm_hour
+
+    cur_reach = _current_band_reach(history, current_band, alpha)
+
+    # Candidate selection is itself evidence-weighted, not reach-ranked: for
+    # each DX band/continent we score reach x confidence, so a thin 87%-from-two-
+    # spots cell loses to a well-corroborated one. This is what stops the engine
+    # nominating 40m off a sliver of data in the first place.
+    best = None  # (reach*confidence, BandEvidence)
+    for band in view.active_bands():
+        if band == current_band:
+            continue
+        for cont in DX_CONTINENTS:
+            cell = view.cell(band, cont)
+            if not cell or cell.count == 0:
+                continue
+            ev = band_evidence(view, history, band, cont, avg_windows,
+                               t, utc_hour, alpha)
+            value = ev.reach * ev.confidence
+            if best is None or value > best[0]:
+                best = (value, ev)
+
+    if best is None:
+        return QsyAdvice(QSY_NONE, None, current_band, cur_reach, "",
+                         "no DX candidate other than the current band")
+    ev = best[1]
+
+    if current_band is None:
+        return QsyAdvice(QSY_NONE, ev, current_band, cur_reach, "",
+                         "not running a single band")
+
+    margin = ev.reach - cur_reach
+    required = t.margin
+    if cur_reach >= t.good_current_reach:
+        required += t.good_current_extra_margin  # current run is already good
+    detail = (f"confidence {ev.confidence:.2f}; margin {round(margin * 100)}pp "
+              f"(need {round(required * 100)}); " + ", ".join(ev.reasons))
+
+    cand_pct, cur_pct = round(ev.reach * 100), round(cur_reach * 100)
+    if (ev.meets_minimums and ev.confidence >= t.move_confidence
+            and margin >= max(required, t.strong_margin)):
+        msg = (f"QSY: {ev.band} is clearly outperforming your {current_band} "
+               f"run into {ev.cont} ({cand_pct}% vs {cur_pct}% reach).")
+        return QsyAdvice(QSY_MOVE, ev, current_band, cur_reach, msg, detail)
+    if (ev.confidence >= t.watch_confidence and margin >= required
+            and ev.trend in (RISING, NEW)):
+        msg = (f"Watch {ev.band}: improving {ev.cont} reach, but evidence is "
+               f"still building ({ev.spots} spots / {ev.skimmers} skimmers).")
+        return QsyAdvice(QSY_WATCH, ev, current_band, cur_reach, msg, detail)
+    return QsyAdvice(QSY_NONE, ev, current_band, cur_reach, "", detail)
 
 
 def mm_current_band(view: WindowSummary) -> str | None:

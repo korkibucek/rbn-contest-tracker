@@ -23,7 +23,9 @@ from .analysis import (
     best_band_per_continent,
     display_bands,
     mm_horizon_trends,
-    recommended_dx_band,
+    QSY_MOVE,
+    QSY_WATCH,
+    qsy_advice,
     score_bands,
 )
 from .continents import CONTINENTS
@@ -559,16 +561,21 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
     if trows:
         rows += _table(_STATION_COLS, trows, inner)
 
-    rec = recommended_dx_band(view, history, cfg.avg_windows)
-    if rec and len(run_status.running_bands) == 1 \
-            and rec[0] != run_status.running_bands[0]:
-        cur = run_status.running_bands[0]
+    # QSY advice is evidence-gated (see analysis.qsy_advice): only a single-band
+    # run can be compared, and a move is suggested only when a candidate band has
+    # reliable evidence and clearly beats the current run. Lower-confidence
+    # openings show as a quieter WATCH note instead of a QSY alert.
+    cur = (run_status.running_bands[0]
+           if len(run_status.running_bands) == 1 else None)
+    advice = qsy_advice(view, history, cur, cfg.avg_windows)
+    if advice.tier == QSY_MOVE:
         rows.append(_hr(width, uc))
-        rows.append([
-            (("» " if uc else ">> "), "warn"), ("QSY  ", "warn"),
-            (f"you're running {cur}, but {rec[0]} is the band into "
-             f"{rec[1]} ({rec[2]}% reach). Consider a move.", "normal"),
-        ])
+        rows.append([(("» " if uc else ">> "), "warn"), ("QSY  ", "warn"),
+                     (advice.message, "normal")])
+    elif advice.tier == QSY_WATCH:
+        rows.append(_hr(width, uc))
+        rows.append([(("· " if uc else "- "), "dim"), ("WATCH  ", "accent"),
+                     (advice.message, "dim")])
     return rows
 
 

@@ -19,7 +19,9 @@ from .analysis import (
     display_bands,
     minutes_label,
     mm_horizon_trends,
-    recommended_dx_band,
+    QSY_MOVE,
+    QSY_WATCH,
+    qsy_advice,
     score_bands,
 )
 from .continents import CONTINENTS
@@ -279,19 +281,18 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
                 f"{speed_s}"
             )
 
-    # QSY suggestion: compare where I'm actually running now to the best DX
-    # opportunity (only meaningful when running a single band).
-    rec = recommended_dx_band(view, history, cfg.avg_windows)
-    if rec and len(run_status.running_bands) == 1:
-        cur = run_status.running_bands[0]
-        rec_band, rec_cont, rec_sp = rec
-        if rec_band != cur:
-            lines.append("")
-            lines.append(
-                f"  >> QSY SUGGESTION: you're running {cur}, but the cohort "
-                f"data says {rec_band} is the band into {rec_cont} "
-                f"({rec_sp} distinct spotters). Consider a move."
-            )
+    # QSY advice: evidence-gated (see analysis.qsy_advice). Only suggest a move
+    # when a candidate band's evidence is reliable AND clearly beats the current
+    # single-band run; weaker openings appear as a quieter "watch" note.
+    cur = (run_status.running_bands[0]
+           if len(run_status.running_bands) == 1 else None)
+    advice = qsy_advice(view, history, cur, cfg.avg_windows)
+    if advice.tier == QSY_MOVE:
+        lines.append("")
+        lines.append(f"  >> {advice.message}")
+    elif advice.tier == QSY_WATCH:
+        lines.append("")
+        lines.append(f"  -  {advice.message}")
     return lines
 
 
