@@ -1,0 +1,59 @@
+name: Publish to PyPI
+
+# Publishes the package to PyPI when a GitHub Release is published.
+#
+# Authentication uses an encrypted GitHub Actions secret named PYPI_API_TOKEN.
+# The token is NOT stored in the repository: add it under
+#   Settings -> Secrets and variables -> Actions -> New repository secret
+# Secrets are encrypted at rest and are not readable by anyone viewing the
+# repo; only this workflow run can access the value.
+#
+# Before releasing, bump rbn_tracker.__version__ to match the release tag,
+# since the package version is read dynamically from it.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and publish
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist and wheel
+        run: |
+          pip install build
+          python -m build
+      - name: Verify the built version matches the release tag
+        run: |
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+          tag = os.environ["RELEASE_TAG"]
+          version = re.search(
+              r'__version__\s*=\s*["\']([^"\']+)["\']',
+              Path("rbn_tracker/__init__.py").read_text(),
+          ).group(1)
+          expected = tag[1:] if tag.startswith("v") else tag
+          if version != expected:
+              raise SystemExit(
+                  f"Release tag {tag!r} (expected version {expected!r}) does not "
+                  f"match rbn_tracker.__version__ {version!r}. Bump __version__ "
+                  f"before releasing."
+              )
+          print(f"OK: version {version} matches tag {tag}")
+          PY
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
