@@ -25,16 +25,16 @@ internal APIs** without a major-version bump.
   can only change deliberately. The CLI is treated as public API under SemVer
   from 1.0.0.
 
-### Fixed
-
-- TUI panels (the RECOMMENDATION box and others) no longer misalign in
-  terminals that render ambiguous-width glyphs — box drawing, arrows, sparkline
-  blocks — as two columns. The renderer is now display-column-aware and
-  auto-detects such terminals; `RBN_AMBIGUOUS_WIDTH=wide|narrow` overrides the
-  detection.
-
 ### Changed
 
+- Redesigned the **RECOMMENDATION** panel for readability: a labelled headline
+  (`Top DX band` / `Best reach` / `Reach` / `Trend`) separated by a divider from
+  a proper fixed-width table with column headings — **Target, Band, Reach,
+  Trend, Spots, Med dB, Coverage** — replacing the old single cramped line per
+  continent. Columns are width-sized to their data (so they stay aligned as
+  numbers grow) and the right-most ones are dropped on narrow terminals;
+  continents with no openings are summarised on one `closed` line. Underlying
+  recommendation maths is unchanged.
 - **CLI (breaking):** `--mycall` is now **required** in all modes, and
   `--callsign` is **required for a live connection** (not needed with
   `--replay`). The previous demo defaults (`M0TTT` / `MM1E`) are removed so the
@@ -42,6 +42,14 @@ internal APIs** without a major-version bump.
 - `--tui` and `--no-tui` are now mutually exclusive (an explicit error instead
   of silent precedence).
 - `--opponents auto` is documented and labelled **experimental** in `--help`.
+
+### Fixed
+
+- TUI panels (the RECOMMENDATION box and others) no longer misalign in
+  terminals that render ambiguous-width glyphs — box drawing, arrows, sparkline
+  blocks — as two columns. The renderer is now display-column-aware and
+  auto-detects such terminals; `RBN_AMBIGUOUS_WIDTH=wide|narrow` overrides the
+  detection.
 
 ## [0.1.0a1] — alpha
 

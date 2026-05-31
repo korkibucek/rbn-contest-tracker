@@ -80,13 +80,20 @@ opening.
 ### Recommendation
 
 Bands ranked for working DX (non-EU), by **reach fraction** rather than raw
-counts — see [configuration.md](configuration.md#reach-not-raw-counts). You get:
+counts — see [configuration.md](configuration.md#reach-not-raw-counts). The
+panel has two parts:
 
-- a **TOP DX BAND** with its best continent and reach;
-- the best band into each open DX continent, showing reach% (of the active UK
-  population), spot count, median SNR, the skimmer-coverage estimate (`cov~N`),
-  and the trend;
-- `closed` where no UK/IE spots were heard into a continent.
+- a **labelled headline** for the single best DX band — `Top DX band`,
+  `Best reach` (continent), `Reach` (% of the active UK/IE population), and
+  `Trend`;
+- a **table** of the best band into each open DX continent, one row per
+  continent under fixed column headings: **Target** (continent), **Band**,
+  **Reach** (`% of N` active), **Trend**, **Spots**, **Med dB** (median SNR),
+  and **Coverage** (skimmer-coverage estimate). On narrower terminals the
+  right-most columns (Coverage, then Med dB, then Spots) are dropped first so
+  the essential Target/Band/Reach/Trend stay aligned.
+
+Continents with no UK/IE spots are listed compactly on a final `closed` line.
 
 ### Your Station
 
@@ -136,8 +143,8 @@ every window and gains a header row when created. Column details are in
 ## Common workflows
 
 - **Pick a run band at the start of a session:** launch live, glance at the
-  Recommendation panel's TOP DX BAND and the per-continent reach, and start
-  there.
+  Recommendation panel's headline Top DX band and the per-continent reach
+  table, and start there.
 - **Decide whether to QSY:** watch the trend arrows on your current band versus
   the recommendation; the Your Station panel will surface a QSY hint when the
   data favours a move.
