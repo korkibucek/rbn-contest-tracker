@@ -111,8 +111,23 @@ under fixed headings: **Band**, **Target** (continent), **Spotters**, **Trend**
 (your signal's current trend on that band), **Best dB** and **Med dB** (your
 best/median SNR), and **Speed** (reported CW speed). On narrower terminals the
 right-most columns (Speed, then Med dB, then Best dB) are dropped first, keeping
-Band/Target/Spotters/Trend aligned. If you're running a band other than the
-recommended one, a **QSY** suggestion follows.
+Band/Target/Spotters/Trend aligned.
+
+If a better band is open, a **contest-aware QSY line** follows. It is not based
+on reach percentage alone — it weighs *propagation evidence* against *target
+viability* (whether the continent is a sensible **run** target at this UTC, from
+the target's local time), so it won't tell you to leave a good NA evening run to
+chase a high-reach-but-overnight Asia opening. You may see:
+
+- `>> QSY: 15m NA is the better run target now …` — a genuine run move.
+- `>> QSY (unusual): …` — an out-of-window target whose evidence is exceptional.
+- `- Mult opportunity: 15m AS open … S&P/mults, not a run move.` — propagation
+  present but a weak run target right now.
+- `- Watch …` — a sensible target whose evidence is still building.
+
+Raw reach stays fully visible in the matrix and recommendation panels; only the
+*action advice* is filtered. See
+[QSY advice: four layers](configuration.md#qsy-advice-four-layers-kept-separate).
 
 If you weren't spotted at all in the window, that's stated plainly rather than
 left blank — usually it means you're doing S&P (skimmers only spot CQ callers),

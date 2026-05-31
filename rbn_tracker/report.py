@@ -62,6 +62,20 @@ class RenderConfig:
     def avg_label(self) -> str:
         return minutes_label(self.avg_window_secs)
 
+    @property
+    def contest_context(self):
+        """Contest-context model for QSY advice, keyed to the probe region.
+
+        Derived from ``mycall``'s continent so run-target viability (and any
+        future region-specific tuning) follows the cohort being tracked.
+        """
+        from .analysis import ContestContext
+        from .continents import continent_for
+        home = continent_for(self.mycall)
+        if home in ("?", None):
+            home = "EU"
+        return ContestContext(home_region=home)
+
 
 SPARK_MAX_POINTS = 24  # cap width; history can hold an hour of windows
 
@@ -286,7 +300,8 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
     # single-band run; weaker openings appear as a quieter "watch" note.
     cur = (run_status.running_bands[0]
            if len(run_status.running_bands) == 1 else None)
-    advice = qsy_advice(view, history, cur, cfg.avg_windows)
+    advice = qsy_advice(view, history, cur, cfg.avg_windows,
+                        context=cfg.contest_context)
     if advice.tier == QSY_MOVE:
         lines.append("")
         lines.append(f"  >> {advice.message}")

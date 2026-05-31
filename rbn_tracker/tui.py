@@ -567,14 +567,18 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
     # openings show as a quieter WATCH note instead of a QSY alert.
     cur = (run_status.running_bands[0]
            if len(run_status.running_bands) == 1 else None)
-    advice = qsy_advice(view, history, cur, cfg.avg_windows)
+    advice = qsy_advice(view, history, cur, cfg.avg_windows,
+                        context=cfg.contest_context)
     if advice.tier == QSY_MOVE:
         rows.append(_hr(width, uc))
-        rows.append([(("» " if uc else ">> "), "warn"), ("QSY  ", "warn"),
+        label = "QSY  " if advice.kind != "unusual" else "QSY? "
+        rows.append([(("» " if uc else ">> "), "warn"), (label, "warn"),
                      (advice.message, "normal")])
     elif advice.tier == QSY_WATCH:
         rows.append(_hr(width, uc))
-        rows.append([(("· " if uc else "- "), "dim"), ("WATCH  ", "accent"),
+        # A mult/info note is calmer than a building-run watch.
+        label = "MULT  " if advice.kind == "mult" else "WATCH  "
+        rows.append([(("· " if uc else "- "), "dim"), (label, "accent"),
                      (advice.message, "dim")])
     return rows
 
