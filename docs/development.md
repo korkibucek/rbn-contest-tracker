@@ -103,16 +103,32 @@ console-entry-point smoke test on every push to `main` and every PR.
 The version is single-sourced from `rbn_tracker/__init__.__version__` and read
 dynamically by `pyproject.toml`, so bumping it in one place updates the package.
 
+Publishing to PyPI is automated by `.github/workflows/publish.yml`: when a
+GitHub **Release** is published, it builds the sdist + wheel, checks that the
+release tag matches `__version__`, and uploads via
+`pypa/gh-action-pypi-publish`. Authentication uses an encrypted GitHub Actions
+secret named `PYPI_API_TOKEN` (repo **Settings → Secrets and variables →
+Actions**); no token is stored in the repository. The job runs in a `pypi`
+environment, so you can require a reviewer before any publish.
+
 ### Release checklist
 
 1. Ensure `python3 -m unittest discover -s tests -t .` passes (CI does this too).
 2. Move the **Unreleased** items in [CHANGELOG.md](../CHANGELOG.md) under a new
    version heading with today's date.
-3. Bump `__version__` in `rbn_tracker/__init__.py` to match.
+3. Bump `__version__` in `rbn_tracker/__init__.py` to the release version (the
+   publish workflow fails if it does not match the tag).
 4. Update docs affected by the change (see the docs checklist below).
-5. Build and check the artifacts: `python -m build` (produces `dist/`).
-6. Tag the release: `git tag vX.Y.Z && git push --tags`.
-7. (When publishing) upload to PyPI with `twine upload dist/*`.
+5. Commit and merge the above to `main`.
+6. Optionally build/inspect locally first: `python -m build` (produces `dist/`).
+7. Cut a GitHub Release with tag `vX.Y.Z` (matching `__version__`). The publish
+   workflow builds and uploads to PyPI automatically.
+
+> **First publish only:** the PyPI project does not exist yet, so the
+> `PYPI_API_TOKEN` secret must initially hold an *account-scoped* token. After
+> the first successful upload, replace it with a *project-scoped* token for
+> `rbn-contest-tracker` (least privilege).
+
 
 ### Keeping docs in step
 

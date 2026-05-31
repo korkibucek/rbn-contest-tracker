@@ -17,6 +17,9 @@ internal APIs** without a major-version bump.
   `rbn_tracker.__version__`).
 - GitHub Actions CI: test suite on Python 3.10–3.13, `pyflakes` lint, and a
   package-build + entry-point smoke test.
+- GitHub Actions release workflow (`publish.yml`): builds and uploads to PyPI on
+  a published GitHub Release, guarding that the tag matches `__version__`. Uses
+  an encrypted `PYPI_API_TOKEN` secret; no token stored in the repo.
 
 ## [0.1.0a1] — alpha
 
