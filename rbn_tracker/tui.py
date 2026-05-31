@@ -35,7 +35,6 @@ from .processing import (
     STEADY,
     WindowSummary,
     band_spotter_series,
-    mm_band_series,
 )
 from .report import RenderConfig, arrow, sparkline
 from .runstate import compute_run_status, idle_tx_suggestion
@@ -81,8 +80,9 @@ def _fmt_uptime(secs: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}"
 
 
-def _fmt_snr(snr: float | None) -> str:
-    return "  - " if snr is None else f"{snr:+.0f}dB"
+def _snr_num(snr: float | None) -> str:
+    """SNR as a bare signed number for a 'dB'-headed table column ('+14', '-')."""
+    return "-" if snr is None else f"{snr:+.0f}"
 
 
 def _fmt_num(n) -> str:
@@ -351,6 +351,47 @@ def _chip_lines(chips: list[tuple[str, Line]], inner: int) -> list[Line]:
     return lines
 
 
+def _table(columns, rows: list[dict], inner: int) -> list[Line]:
+    """Render a fixed-width table: a heading row plus one row per entry.
+
+    ``columns`` is a list of ``(key, header, align, drop_priority)``; columns
+    with priority 0 are always kept, higher priorities are shed first when the
+    table would not fit ``inner`` display columns. ``rows`` is a list of dicts
+    mapping every column key to a ``(text, style)`` pair. Each column is sized to
+    the wider of its heading and its values, so it stays aligned as values grow.
+    """
+    headers = {k: h for (k, h, _a, _p) in columns}
+    cols = list(columns)
+
+    def width(k):
+        return max(len(headers[k]), max((len(r[k][0]) for r in rows), default=0))
+
+    def measure(cs):
+        w = {k: width(k) for (k, *_r) in cs}
+        total = sum(w.values()) + 2 * max(0, len(cs) - 1)
+        return total <= inner, w
+
+    ok, w = measure(cols)
+    while not ok and any(p > 0 for *_x, p in cols):
+        drop = max((c for c in cols if c[3] > 0), key=lambda c: c[3])
+        cols.remove(drop)
+        ok, w = measure(cols)
+
+    def mkrow(get) -> Line:
+        line: Line = []
+        for i, (k, _h, align, _p) in enumerate(cols):
+            if i:
+                line.append(("  ", "dim"))
+            text, sty = get(k)
+            line.append((_pad(text, w[k], align), sty))
+        return line
+
+    out: list[Line] = [mkrow(lambda k: (headers[k], "dim"))]
+    for r in rows:
+        out.append(mkrow(lambda k, r=r: r[k]))
+    return out
+
+
 # RECOMMENDATION table columns: (key, header, align, drop-priority).
 # Higher drop-priority is shed first when the terminal is too narrow; the first
 # three columns (priority 0) are always kept.
@@ -362,6 +403,19 @@ _REC_COLS = [
     ("spots", "Spots", ">", 2),
     ("snr", "Med dB", ">", 3),
     ("cov", "Coverage", ">", 4),
+]
+
+# YOUR STATION "getting out" table columns (per band x continent you're heard
+# on). Band/Target/Spotters are always kept; the rest are shed on narrow
+# terminals. Trend is the band's current ("now") trend in your own spots.
+_STATION_COLS = [
+    ("band", "Band", "<", 0),
+    ("target", "Target", "<", 0),
+    ("spotters", "Spotters", ">", 0),
+    ("trend", "Trend", "<", 1),
+    ("best", "Best dB", ">", 2),
+    ("med", "Med dB", ">", 3),
+    ("speed", "Speed", ">", 4),
 ]
 
 
@@ -414,38 +468,13 @@ def _rec_body(view, history, cfg, scored, span, uc, width) -> list[Line]:
              "spots": "normal", "snr": "normal", "cov": "normal"}
 
     if data:
-        cols = list(_REC_COLS)
-        # Width each kept column to its header / widest value, then drop the
-        # lowest-priority columns until the row fits the panel.
-        def widths(cs):
-            return {k: max(len(h), *(len(cell(k, c, b)) for c, b in data))
-                    for (k, h, _a, _p) in cs}
-
-        def total(cs, w):
-            return sum(w[k] for (k, *_r) in cs) + 2 * (len(cs) - 1)
-
-        w = widths(cols)
-        while total(cols, w) > inner and any(p > 0 for *_x, p in cols):
-            drop = max((c for c in cols if c[3] > 0), key=lambda c: c[3])
-            cols.remove(drop)
-            w = widths(cols)
-
-        def render_row(cells: dict, sty) -> Line:
-            line: Line = []
-            for i, (k, _h, align, _p) in enumerate(cols):
-                if i:
-                    line.append(("  ", "dim"))
-                s = sty(k) if callable(sty) else sty
-                line.append((_pad(cells[k], w[k], align), s))
-            return line
-
-        header_cells = {k: h for (k, h, _a, _p) in cols}
-        rows.append(render_row(header_cells, "dim"))
-        for cont, best in data:
-            cells = {k: cell(k, cont, best) for (k, *_r) in cols}
-            row_style = (lambda k, b=best: _trend_style(b.trend)
-                         if k == "trend" else style[k])
-            rows.append(render_row(cells, row_style))
+        trows = [
+            {k: (cell(k, cont, best),
+                 _trend_style(best.trend) if k == "trend" else style[k])
+             for (k, *_r) in _REC_COLS}
+            for cont, best in data
+        ]
+        rows += _table(_REC_COLS, trows, inner)
 
     if closed:
         d = "—" if uc else "-"
@@ -459,23 +488,25 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
     run_status = compute_run_status(summary, history, cfg.window_secs,
                                     cfg.category_key)
     open_dx_bands = [r.band for r in scored] if scored else []
+    inner = _inner_cols(width, uc)
     arrow_to = "→" if uc else "->"
     dash = "—" if uc else "-"
 
-    run_line: Line = [(f"RUN  [{run_status.category_name}, "
-                       f"{run_status.max_tx} TX]   ", "dim"),
-                      ("CQ on ", "dim")]
+    # --- headline: run status, every field labelled ----------------------
+    cq_val: Line = []
     if run_status.running_bands:
         for i, band in enumerate(run_status.running_bands):
             if i:
-                run_line.append((", ", "dim"))
-            run_line.append((band, "good"))
+                cq_val.append((", ", "dim"))
+            cq_val.append((band, "good"))
             if band in run_status.frequencies:
-                run_line.append((f" @ {run_status.frequencies[band]:.1f}",
-                                 "accent"))
+                cq_val.append((f" @ {run_status.frequencies[band]:.1f}",
+                               "accent"))
     else:
-        run_line.append(("nothing", "warn"))
-    rows.append(run_line)
+        cq_val.append(("nothing", "warn"))
+    cat_val: Line = [(f"{run_status.category_name}, {run_status.max_tx} TX",
+                      "normal")]
+    rows += _chip_lines([("CQ on", cq_val), ("Category", cat_val)], inner)
 
     if run_status.max_tx == 1 and run_status.running_count > 1:
         rows.append([(f"  running {run_status.running_count} bands at once "
@@ -506,29 +537,28 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
                       "calling CQ / band may be dead where you are.", "warn")])
         return rows
 
+    # --- table: who is hearing you, where, and how well -------------------
+    trows: list[dict] = []
     for band in view.mm_bands():
-        series = mm_band_series(history, band)
-        trends = mm_horizon_trends(history, band, cfg.window_secs)
-        total_sp = view.mm_band_spotters(band)
-        line: Line = [
-            (f"{band:<4} ", "accent"),
-            (f"{total_sp:>2} spotters  ", "good"),
-            (_pad(sparkline(series, uc), 10, "<") + " ", "normal"),
-        ]
-        line += _horizon_segments(trends, uc)
-        rows.append(line)
+        now_trend = mm_horizon_trends(history, band, cfg.window_secs)[0][1]
         for cont in CONTINENTS:
             obs = view.mm.get((band, cont))
             if not obs:
                 continue
-            speed = obs.typical_speed
-            speed_s = f", ~{speed}wpm" if speed is not None else ""
-            rows.append([
-                (f"   {cont}  ", "dim"),
-                (f"{obs.distinct_spotters} spotters, best "
-                 f"{_fmt_snr(obs.best_snr)}, med {_fmt_snr(obs.median_snr)}"
-                 f"{speed_s}", "normal"),
-            ])
+            speed = (f"{obs.typical_speed}wpm"
+                     if obs.typical_speed is not None else "-")
+            trows.append({
+                "band": (band, "accent"),
+                "target": (cont, "dim"),
+                "spotters": (str(obs.distinct_spotters), "good"),
+                "trend": (now_trend, _trend_style(now_trend)),
+                "best": (_snr_num(obs.best_snr), "normal"),
+                "med": (_snr_num(obs.median_snr), "normal"),
+                "speed": (speed, "normal"),
+            })
+    if trows:
+        rows += _table(_STATION_COLS, trows, inner)
+
     rec = recommended_dx_band(view, history, cfg.avg_windows)
     if rec and len(run_status.running_bands) == 1 \
             and rec[0] != run_status.running_bands[0]:

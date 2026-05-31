@@ -206,8 +206,13 @@ class TestDisplayWidth(unittest.TestCase):
 
 def _rec_panel_lines(frame):
     """The plain-text lines of the RECOMMENDATION panel (incl. its borders)."""
+    return _panel_lines(frame, "RECOMMENDATION")
+
+
+def _panel_lines(frame, keyword):
+    """The plain-text lines of the named panel (incl. its borders)."""
     lines = ["".join(t for t, _ in line) for line in frame]
-    start = next(i for i, s in enumerate(lines) if "RECOMMENDATION" in s)
+    start = next(i for i, s in enumerate(lines) if keyword in s)
     end = next(i for i in range(start + 1, len(lines)) if lines[i][:1] in "└+")
     return lines[start:end + 1]
 
@@ -259,6 +264,56 @@ class TestRecommendationPanel(unittest.TestCase):
     def test_ascii_panel_is_pure_ascii(self):
         body = "\n".join(_rec_panel_lines(self._frame(84, uc=False)))
         body.encode("ascii")  # must not raise
+
+
+class TestStationPanel(unittest.TestCase):
+    """The YOUR STATION panel: labelled run headline + a fixed-width table."""
+
+    def _frame(self, width, uc=True, proc=None):
+        proc = proc or _proc_with_data()  # NA skimmers spot MM1E on 15m
+        cfg = RenderConfig(mycall="MM1E", use_unicode=uc, window_secs=60)
+        return build_frame(proc.snapshot(60), list(proc.history), cfg,
+                           TuiState(now=60), None, width=width)
+
+    def _lines(self, *a, **k):
+        return _panel_lines(self._frame(*a, **k), "YOUR STATION")
+
+    def test_run_headline_is_labelled(self):
+        body = "\n".join(self._lines(84))
+        self.assertIn("CQ on:", body)
+        self.assertIn("Category:", body)
+
+    def test_table_has_column_headings(self):
+        header = next(l for l in self._lines(84) if "Band" in l and "Target" in l)
+        for col in ("Band", "Target", "Spotters", "Trend", "Best dB", "Med dB",
+                    "Speed"):
+            self.assertIn(col, header)
+
+    def test_table_columns_align_with_header(self):
+        lines = self._lines(84)
+        hi = next(i for i, l in enumerate(lines) if "Band" in l and "Target" in l)
+        header, first_row = lines[hi], lines[hi + 1]
+        self.assertEqual(header.index("Target"), first_row.index("NA"))
+
+    def test_narrow_terminal_drops_low_priority_columns(self):
+        wide = next(l for l in self._lines(84) if "Band" in l and "Target" in l)
+        self.assertIn("Speed", wide)
+        narrow = next(l for l in self._lines(48) if "Band" in l and "Target" in l)
+        self.assertNotIn("Speed", narrow)
+        for col in ("Band", "Target", "Spotters", "Trend"):
+            self.assertIn(col, narrow)
+
+    def test_not_spotted_message(self):
+        proc = SpotProcessor("MM1E", window_secs=60, history=5)
+        # spots that are NOT MM1E -> the station is never heard
+        for i, sp in enumerate(["W3LPL-#", "K1TTT-#"]):
+            proc.add(spot(sp, "G4ABC", 21025, 15, t=10 + i))
+        proc.commit(60)
+        body = "\n".join(self._lines(84, proc=proc))
+        self.assertIn("not spotted", body)
+
+    def test_ascii_panel_is_pure_ascii(self):
+        "\n".join(self._lines(84, uc=False)).encode("ascii")  # must not raise
 
 
 if __name__ == "__main__":

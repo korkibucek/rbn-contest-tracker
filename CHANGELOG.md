@@ -35,6 +35,13 @@ internal APIs** without a major-version bump.
   numbers grow) and the right-most ones are dropped on narrow terminals;
   continents with no openings are summarised on one `closed` line. Underlying
   recommendation maths is unchanged.
+- Redesigned the **YOUR STATION** panel to match: a labelled run headline
+  (`CQ on` / `Category`) and run alerts, then a fixed-width table of who is
+  hearing you — **Band, Target, Spotters, Trend, Best dB, Med dB, Speed** —
+  replacing the old crammed per-band/per-continent lines. Columns drop on narrow
+  terminals (Speed → Med dB → Best dB). The per-band sparkline and multi-horizon
+  strip were consolidated to a single per-band Trend column; full sparklines and
+  multi-horizon trends remain in the BAND TRENDS panel.
 - **CLI (breaking):** `--mycall` is now **required** in all modes, and
   `--callsign` is **required for a live connection** (not needed with
   `--replay`). The previous demo defaults (`M0TTT` / `MM1E`) are removed so the

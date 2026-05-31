@@ -97,19 +97,22 @@ Continents with no UK/IE spots are listed compactly on a final `closed` line.
 
 ### Your Station
 
-Tracks `--mycall`. The **RUN** block shows:
+Tracks `--mycall`. A **labelled headline** shows your run status — `CQ on`
+(the band(s) you're running and the frequency, e.g. `CQ on: 20m @ 14026.0`) and
+`Category` — followed by any run alerts:
 
-- the band(s) you're currently **running CQ** on and your run frequency
-  (e.g. `CQ on 20m @ 14026.0`);
 - **band changes** inferred when one band goes quiet as another lights up
   (`band change: 40m → 15m`);
 - bands you've **gone quiet** on (`no CQ for ~3m — gone S&P or off this band`);
 - category-specific checks (see below).
 
-Below that, per band you were spotted on: distinct spotters, the continents
-reaching you, your best/median SNR, and reported CW speed. If you haven't been
-spotted, it says so. If you're running a band other than the recommended one, it
-prints a **QSY** suggestion.
+Below a divider, a **table** of who is hearing you, one row per band × continent
+under fixed headings: **Band**, **Target** (continent), **Spotters**, **Trend**
+(your signal's current trend on that band), **Best dB** and **Med dB** (your
+best/median SNR), and **Speed** (reported CW speed). On narrower terminals the
+right-most columns (Speed, then Med dB, then Best dB) are dropped first, keeping
+Band/Target/Spotters/Trend aligned. If you're running a band other than the
+recommended one, a **QSY** suggestion follows.
 
 If you weren't spotted at all in the window, that's stated plainly rather than
 left blank — usually it means you're doing S&P (skimmers only spot CQ callers),
