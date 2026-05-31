@@ -37,6 +37,12 @@ Run `python3 -m rbn_tracker --help` for the authoritative list. Current flags:
 The viewer is the default when stdout is an interactive terminal; otherwise (or
 with `--once` / `--replay`) the line report is used.
 
+The viewer auto-detects terminals that render ambiguous-width glyphs (box
+drawing, arrows, sparklines) as double-width and adjusts the layout so the
+panels stay aligned. Override the detection with the `RBN_AMBIGUOUS_WIDTH`
+environment variable (`wide` or `narrow`) if it guesses wrong — see
+[troubleshooting](troubleshooting.md#display).
+
 ### Contest category
 
 | Flag | Default | Meaning |

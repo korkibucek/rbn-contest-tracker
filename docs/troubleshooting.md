@@ -30,6 +30,16 @@ That's the ASCII fallback. It's automatic when the terminal encoding isn't UTF-8
 and forced by `--ascii`. To get the Unicode look, ensure a UTF-8 locale
 (e.g. `LANG=en_GB.UTF-8`) and don't pass `--ascii`.
 
+**Box borders don't line up — the bottom border runs past the sides.**
+Your terminal is drawing "ambiguous-width" characters (box-drawing glyphs,
+arrows, sparkline blocks) as *two* columns instead of one. The viewer detects
+this automatically and adjusts the layout, but detection can fail on some
+terminals/multiplexers. Force it with `RBN_AMBIGUOUS_WIDTH=wide` (or
+`=narrow` to force single-width). Many terminals also have a setting to turn
+this off — e.g. iTerm2: *Profiles → Text → "Treat ambiguous-width characters as
+double width"*; macOS Terminal: *Profiles → Advanced → "East Asian ambiguous
+characters are wide"*. `--ascii` sidesteps it entirely (all width-1 glyphs).
+
 **Layout looks cramped or columns are clipped.**
 Panels size to the terminal width (clamped ~44–120 columns). Widen the window;
 content is clipped rather than wrapped so borders stay aligned. Very narrow

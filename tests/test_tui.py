@@ -137,6 +137,53 @@ class TestBuildFrame(unittest.TestCase):
         self.assertIn("+", text)  # ascii box corners
         self.assertIn("|", text)  # ascii vertical border
 
+
+class TestDisplayWidth(unittest.TestCase):
+    """Ambiguous-width handling: the box must line up even in terminals that
+    render box-drawing/arrow/sparkline glyphs as two columns."""
+
+    def tearDown(self):
+        from rbn_tracker import tui
+        tui.set_ambiguous_width(False)  # don't leak state into other tests
+
+    def test_char_width_modes(self):
+        from rbn_tracker import tui
+        tui.set_ambiguous_width(False)
+        self.assertEqual(tui.char_width("─"), 1)   # ambiguous -> 1 normally
+        self.assertEqual(tui.char_width("A"), 1)
+        self.assertEqual(tui.char_width("世"), 2)  # genuinely wide always
+        self.assertEqual(tui.char_width("́"), 0)  # combining mark
+        tui.set_ambiguous_width(True)
+        self.assertEqual(tui.char_width("─"), 2)   # ambiguous -> 2 when wide
+        self.assertEqual(tui.char_width("→"), 2)
+        self.assertEqual(tui.char_width("A"), 1)   # ascii unaffected
+        self.assertEqual(tui.char_width("世"), 2)
+
+    def test_panels_aligned_in_wide_ambiguous_mode(self):
+        from rbn_tracker import tui
+        proc = _proc_with_data()
+        cfg = RenderConfig(mycall="MM1E", use_unicode=True, window_secs=60)
+        for width in (84, 83, 60):
+            tui.set_ambiguous_width(True)
+            frame = build_frame(proc.snapshot(60), list(proc.history), cfg,
+                                TuiState(now=60), None, width=width)
+            for line in frame:
+                s = "".join(t for t, _ in line)
+                if s.startswith(" RBN") or not s.strip():
+                    continue
+                # measured with the SAME width function the renderer uses
+                self.assertEqual(tui.text_width(s), width,
+                                 f"misaligned (w={width}): {s!r}")
+
+    def test_detect_respects_env_override(self):
+        import os
+        from unittest import mock
+        from rbn_tracker import tui
+        with mock.patch.dict(os.environ, {"RBN_AMBIGUOUS_WIDTH": "wide"}):
+            self.assertTrue(tui._detect_ambiguous_wide(None))
+        with mock.patch.dict(os.environ, {"RBN_AMBIGUOUS_WIDTH": "narrow"}):
+            self.assertFalse(tui._detect_ambiguous_wide(None))
+
     def test_narrow_width_stays_aligned(self):
         proc = _proc_with_data()
         cfg = RenderConfig(mycall="MM1E", use_unicode=True, window_secs=60)
