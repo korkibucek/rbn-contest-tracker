@@ -59,8 +59,11 @@ Roughly in priority order. Items are intentionally not dated.
       contestonlinescore.com integration against the live API (and document the
       exact response shape), or keep it clearly experimental/opt-in with
       `manual` as the documented default. (Currently kept experimental.)
-- [ ] **Stabilise the CLI surface** — review flag names/defaults and commit to
-      them, since post-1.0 changes should follow semver.
+- [x] **Stabilise the CLI surface** — reviewed flag names/defaults and locked
+      them with `tests/test_cli_surface.py`. The demo login/track defaults were
+      removed (`--mycall` required everywhere, `--callsign` required for live),
+      `--tui`/`--no-tui` made mutually exclusive, and `auto` labelled
+      experimental. The CLI is now public API under SemVer from 1.0.0.
 
 ### Should-have
 

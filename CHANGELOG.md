@@ -20,6 +20,20 @@ internal APIs** without a major-version bump.
 - GitHub Actions release workflow (`publish.yml`): builds and uploads to PyPI on
   a published GitHub Release, guarding that the tag matches `__version__`. Uses
   an encrypted `PYPI_API_TOKEN` secret; no token stored in the repo.
+- CLI surface-lock test (`tests/test_cli_surface.py`) pinning every flag's name,
+  default, type, choices and required-ness, so the public command-line surface
+  can only change deliberately. The CLI is treated as public API under SemVer
+  from 1.0.0.
+
+### Changed
+
+- **CLI (breaking):** `--mycall` is now **required** in all modes, and
+  `--callsign` is **required for a live connection** (not needed with
+  `--replay`). The previous demo defaults (`M0TTT` / `MM1E`) are removed so the
+  tool no longer logs into RBN, or tracks a station, under a placeholder call.
+- `--tui` and `--no-tui` are now mutually exclusive (an explicit error instead
+  of silent precedence).
+- `--opponents auto` is documented and labelled **experimental** in `--help`.
 
 ## [0.1.0a1] — alpha
 

@@ -3,9 +3,9 @@
 # run.sh — launch the RBN Contest Tracker from its virtualenv.
 # Any arguments are passed straight through to `python -m rbn_tracker`.
 #
-#   ./deploy/run.sh                       # live feed, defaults
-#   ./deploy/run.sh --csv contest.csv
-#   ./deploy/run.sh --replay samples/sample_feed.txt --ascii
+#   ./deploy/run.sh --callsign M0TTT --mycall M0TTT          # live feed (use your call)
+#   ./deploy/run.sh --callsign M0TTT --mycall M0TTT --csv contest.csv
+#   ./deploy/run.sh --replay samples/sample_feed.txt --mycall MM1E --ascii
 #   ./deploy/run.sh --help
 
 set -euo pipefail

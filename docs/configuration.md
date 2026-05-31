@@ -12,8 +12,8 @@ Run `python3 -m rbn_tracker --help` for the authoritative list. Current flags:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--callsign CALL` | `M0TTT` | Callsign used to **log in** to the RBN telnet feed. |
-| `--mycall CALL` | `MM1E` | The station tracked in the **Your Station** panel. |
+| `--callsign CALL` | – | Callsign used to **log in** to the RBN telnet feed. **Required for a live connection**; not needed with `--replay`. |
+| `--mycall CALL` | – | The station tracked in the **Your Station** panel. **Required.** |
 
 ### Windowing & trends
 
@@ -27,8 +27,8 @@ Run `python3 -m rbn_tracker --help` for the authoritative list. Current flags:
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--tui` | auto | Force the full-screen viewer. |
-| `--no-tui` | off | Force the classic scrolling line report. |
+| `--tui` | auto | Force the full-screen viewer. Mutually exclusive with `--no-tui`. |
+| `--no-tui` | off | Force the classic scrolling line report. Mutually exclusive with `--tui`. |
 | `--ascii` | off | Force ASCII box-drawing / sparklines / arrows (no Unicode). |
 | `--once` | off | Emit a single window then exit (implies the line report). |
 | `-v`, `--verbose` | off | Debug logging to stderr. |
@@ -47,7 +47,7 @@ with `--once` / `--replay`) the line report is used.
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--opponents MODE` | `off` | `off`, `auto` (contestonlinescore.com) or `manual`. |
+| `--opponents MODE` | `off` | `off`, `manual`, or `auto` (**experimental** — contestonlinescore.com). |
 | `--opponents-file FILE` | – | Competitor list for `manual` mode. |
 | `--opponents-window N` | `5` | Show ±N stations around you. |
 | `--contest ID` | – | Contest id for `auto`. |
@@ -74,7 +74,7 @@ with `#` comments allowed. Include your own call and score so the list can rank
 sample is in [`samples/opponents.txt`](../samples/opponents.txt).
 
 ```bash
-python3 -m rbn_tracker --mycall MM1E \
+python3 -m rbn_tracker --callsign M0TTT --mycall MM1E \
   --opponents manual --opponents-file samples/opponents.txt
 ```
 

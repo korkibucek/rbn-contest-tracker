@@ -90,8 +90,8 @@ On macOS, the helper script sets up an isolated virtualenv and verifies the
 install by running the test suite:
 
 ```bash
-./deploy/install_macos.sh     # creates .venv, runs the tests
-./deploy/run.sh               # launch (arguments pass through to the CLI)
+./deploy/install_macos.sh                        # creates .venv, runs the tests
+./deploy/run.sh --callsign M0TTT --mycall M0TTT  # launch (args pass through; use your call)
 ```
 
 See [docs/getting-started.md](docs/getting-started.md) for details.
@@ -99,14 +99,15 @@ See [docs/getting-started.md](docs/getting-started.md) for details.
 ## Quick start
 
 ```bash
-# Live: connect to RBN, log in as M0TTT, track MM1E — opens the full-screen viewer
-python3 -m rbn_tracker --mycall MM1E
+# Live: log in to RBN as your call, track your station — opens the full-screen viewer
+# (use your own callsign for both)
+python3 -m rbn_tracker --callsign M0TTT --mycall M0TTT
 
-# Try it with no network, using the bundled synthetic feed
-python3 -m rbn_tracker --replay samples/sample_feed.txt --ascii
+# Try it with no network, using the bundled synthetic feed (no login needed)
+python3 -m rbn_tracker --replay samples/sample_feed.txt --mycall MM1E --ascii
 
 # Classic scrolling line report instead of the viewer, with CSV logging
-python3 -m rbn_tracker --mycall MM1E --no-tui --csv contest.csv
+python3 -m rbn_tracker --callsign M0TTT --mycall M0TTT --no-tui --csv contest.csv
 ```
 
 In the viewer: **`q`** quits, **`p`** pauses/resumes. Full walk-through in

@@ -56,9 +56,6 @@ def _category(text: str) -> str:
 
 log = logging.getLogger("rbn")
 
-DEFAULT_CALLSIGN = "M0TTT"
-DEFAULT_MYCALL = "MM1E"
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -67,12 +64,11 @@ def build_parser() -> argparse.ArgumentParser:
                     "report for UK/IE CW activity, with trend tracking and a "
                     "dedicated section for your own station.",
     )
-    p.add_argument("--callsign", default=DEFAULT_CALLSIGN,
-                   help="callsign used to log in to the RBN feed "
-                        f"(default {DEFAULT_CALLSIGN})")
-    p.add_argument("--mycall", default=DEFAULT_MYCALL,
-                   help=f"station to track in the 'me' section "
-                        f"(default {DEFAULT_MYCALL})")
+    p.add_argument("--callsign", default=None,
+                   help="callsign used to log in to the RBN feed (required for "
+                        "a live connection; not needed with --replay)")
+    p.add_argument("--mycall", required=True,
+                   help="station to track in the 'me' section (required)")
     p.add_argument("--window", type=int, default=60, metavar="SECONDS",
                    help="base sampling/commit window in seconds (default 60)")
     p.add_argument("--avg-window", type=float, default=15.0, metavar="MINUTES",
@@ -86,9 +82,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="number of windows kept for trend analysis (default 5)")
     p.add_argument("--opponents", choices=["auto", "manual", "off"],
                    default="off",
-                   help="opponents leaderboard source (default off; 'auto' "
-                        "pulls live scores from contestonlinescore.com -- needs "
-                        "--score-url/--contest; 'manual' uses --opponents-file)")
+                   help="opponents leaderboard source (default off; 'manual' "
+                        "uses --opponents-file; 'auto' is EXPERIMENTAL and pulls "
+                        "live scores from contestonlinescore.com -- needs "
+                        "--score-url/--contest)")
     p.add_argument("--opponents-file", metavar="FILE",
                    help="manual opponents list (callsign[,qsos,mults,score] "
                         "per line); used with --opponents manual")
@@ -112,10 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "receive time, otherwise times auto-increment")
     p.add_argument("--ascii", action="store_true",
                    help="force ASCII sparklines/arrows (no Unicode)")
-    p.add_argument("--tui", action="store_true",
-                   help="force the full-screen interactive viewer")
-    p.add_argument("--no-tui", action="store_true",
-                   help="force the classic scrolling line report")
+    view = p.add_mutually_exclusive_group()
+    view.add_argument("--tui", action="store_true",
+                      help="force the full-screen interactive viewer")
+    view.add_argument("--no-tui", action="store_true",
+                      help="force the classic scrolling line report")
     p.add_argument("-v", "--verbose", action="store_true", help="debug logging")
     p.add_argument("--version", action="version",
                    version=f"%(prog)s {__version__}")
@@ -316,7 +314,11 @@ def _emit(summary, processor, cfg, csv_writer, opponents=None, now=None) -> None
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if not args.replay and not args.callsign:
+        parser.error("--callsign is required for a live connection "
+                     "(omit it only with --replay)")
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
