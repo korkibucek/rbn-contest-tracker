@@ -262,28 +262,6 @@ def best_band_per_continent(view: WindowSummary,
     return result
 
 
-def recommended_dx_band(view: WindowSummary, history: list[WindowSummary],
-                        avg_windows: int,
-                        alpha: float = REACH_EWMA_ALPHA) -> tuple[str, str, int] | None:
-    """(band, continent, reach_pct_int) of the single best DX opportunity."""
-    best = None
-    for band in view.active_bands():
-        trend = classify_horizon(band_spotter_series(history, band), avg_windows)
-        wgt = TREND_WEIGHT.get(trend, 1.0)
-        conf = activity_confidence(view, band)
-        for cont in DX_CONTINENTS:
-            cell = view.cell(band, cont)
-            if not cell or cell.count == 0:
-                continue
-            sr = smoothed_reach(history, band, cont, alpha)
-            val = sr * coverage_factor(view, cont) * conf * wgt
-            if best is None or val > best[0]:
-                best = (val, band, cont, round(sr * 100))
-    if best is None:
-        return None
-    return best[1], best[2], best[3]
-
-
 # ---------------------------------------------------------------------------
 # QSY decision quality: an evidence model + tiered, gated advice.
 #
