@@ -56,6 +56,13 @@ internal APIs** without a major-version bump.
   terminals (Speed → Med dB → Best dB). The per-band sparkline and multi-horizon
   strip were consolidated to a single per-band Trend column; full sparklines and
   multi-horizon trends remain in the BAND TRENDS panel.
+- The **plain-text report** (`--no-tui`, also `--once` / `--replay` and piped
+  output) now mirrors the TUI's RECOMMENDATION and YOUR STATION layout: the same
+  labelled headline and the same fixed-width tables (Target/Band/Reach/Trend/
+  Spots/Med dB/Coverage and Band/Target/Spotters/Trend/Best dB/Med dB/Speed)
+  instead of the old prose lines, so the two front-ends present one information
+  model and can't drift apart. The column specs and per-row field values are now
+  defined once in `rbn_tracker/tables.py` and shared by both renderers.
 - **CLI (breaking):** `--mycall` is now **required** in all modes, and
   `--callsign` is **required for a live connection** (not needed with
   `--replay`). The previous demo defaults (`M0TTT` / `MM1E`) are removed so the
@@ -71,6 +78,11 @@ internal APIs** without a major-version bump.
   blocks — as two columns. The renderer is now display-column-aware and
   auto-detects such terminals; `RBN_AMBIGUOUS_WIDTH=wide|narrow` overrides the
   detection.
+
+### Removed
+
+- Dead code: `analysis.recommended_dx_band()`, which had no callers after the
+  evidence-gated `qsy_advice` pipeline superseded it.
 
 ## [0.1.0a1] — alpha
 

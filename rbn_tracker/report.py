@@ -15,10 +15,8 @@ from .analysis import (
     DEFAULT_AVG_WINDOW_SECS,
     aggregate_windows,
     band_horizon_trends,
-    best_band_per_continent,
     display_bands,
     minutes_label,
-    mm_horizon_trends,
     QSY_MOVE,
     QSY_WATCH,
     qsy_advice,
@@ -33,10 +31,10 @@ from .processing import (
     STEADY,
     WindowSummary,
     band_spotter_series,
-    mm_band_series,
     windows_for_secs,
 )
 from .runstate import RunStatus, compute_run_status, idle_tx_suggestion
+from .tables import REC_COLS, STATION_COLS, rec_rows, station_rows, text_table
 
 _SPARK_UNICODE = "▁▂▃▄▅▆▇█"
 _SPARK_ASCII = "_.-=+*#@"
@@ -103,12 +101,6 @@ def sparkline(series: list[int], use_unicode: bool = True,
 def arrow(trend: str, use_unicode: bool = True) -> str:
     table = _ARROW_UNICODE if use_unicode else _ARROW_ASCII
     return table.get(trend, "-" if not use_unicode else "→")
-
-
-def _fmt_snr(snr: float | None) -> str:
-    if snr is None:
-        return "  -  "
-    return f"{snr:+.0f}dB"
 
 
 def _horizon_strip(trends: list[tuple[str, str]], use_unicode: bool) -> str:
@@ -199,28 +191,25 @@ def _render_recommendation(view: WindowSummary,
                      "into DX -- watch the trends.")
         return lines
 
+    # Labelled headline mirroring the TUI recommendation panel.
     top = scored[0]
     best_c = top.best_cont or "DX"
     lines.append(
-        f"  TOP DX BAND: {top.band}  "
-        f"(best reach {best_c} {top.best_reach*100:.0f}% of {top.active_uk} "
-        f"active UK, {top.trend})"
+        f"  Top DX band: {top.band}   Best reach: {best_c}   "
+        f"Reach: {top.best_reach*100:.0f}% of {top.active_uk} active   "
+        f"Trend: {top.trend}"
     )
 
-    # Best band per open DX continent (reach% = fraction of active UK stations
-    # on that band reaching the continent; cov = skimmers listening there).
+    # Supporting table: best band per open DX continent. Same fields/order as
+    # the TUI (reach% = fraction of active UK stations on that band reaching the
+    # continent; Coverage ~ skimmers listening there), via the shared model.
     lines.append("")
-    lines.append("  Best band per continent:")
-    for cont, best in best_band_per_continent(view, history, cfg.avg_windows).items():
-        if best is None:
-            lines.append(f"    {cont}: closed (no UK/IE spots heard there)")
-            continue
-        lines.append(
-            f"    {cont}: {best.band}  {best.reach*100:.0f}% reach "
-            f"(of {best.active_uk} active) / {best.count} sp / "
-            f"med {_fmt_snr(best.median_snr)} / cov~{best.coverage} / "
-            f"{arrow(best.trend, cfg.use_unicode)} {best.trend}"
-        )
+    data, closed = rec_rows(view, history, cfg.avg_windows)
+    if data:
+        lines += ["  " + row for row in text_table(REC_COLS, data)]
+    if closed:
+        lines.append(f"  closed: {', '.join(closed)} "
+                     "(no UK/IE spots heard there)")
     return lines
 
 
@@ -274,26 +263,11 @@ def _render_mm(view: WindowSummary, history: list[WindowSummary],
         )
         return lines
 
-    for band in view.mm_bands():
-        series = mm_band_series(history, band)
-        trends = mm_horizon_trends(history, band, cfg.window_secs)
-        total_sp = view.mm_band_spotters(band)
-        lines.append(
-            f"  {me} {band}: {total_sp} distinct spotters   "
-            f"{sparkline(series, cfg.use_unicode)}  "
-            f"{_horizon_strip(trends, cfg.use_unicode)}"
-        )
-        for cont in CONTINENTS:
-            obs = view.mm.get((band, cont))
-            if not obs:
-                continue
-            speed = obs.typical_speed
-            speed_s = f", ~{speed}wpm" if speed is not None else ""
-            lines.append(
-                f"      {cont}: {obs.distinct_spotters} spotters, "
-                f"best {_fmt_snr(obs.best_snr)}, med {_fmt_snr(obs.median_snr)}"
-                f"{speed_s}"
-            )
+    # Same fields/order as the TUI station panel (who is hearing you, where, and
+    # how well), via the shared table model.
+    rows = station_rows(view, history, cfg.window_secs)
+    if rows:
+        lines += ["  " + row for row in text_table(STATION_COLS, rows)]
 
     # QSY advice: evidence-gated (see analysis.qsy_advice). Only suggest a move
     # when a candidate band's evidence is reliable AND clearly beats the current

@@ -20,9 +20,7 @@ from dataclasses import dataclass, field
 from .analysis import (
     aggregate_windows,
     band_horizon_trends,
-    best_band_per_continent,
     display_bands,
-    mm_horizon_trends,
     QSY_MOVE,
     QSY_WATCH,
     qsy_advice,
@@ -40,6 +38,12 @@ from .processing import (
 )
 from .report import RenderConfig, arrow, sparkline
 from .runstate import compute_run_status, idle_tx_suggestion
+from .tables import (
+    REC_COLS as _REC_COLS,
+    STATION_COLS as _STATION_COLS,
+    rec_rows,
+    station_rows,
+)
 
 Segment = tuple[str, str]
 Line = list[Segment]
@@ -80,11 +84,6 @@ def _fmt_uptime(secs: float) -> str:
     h, rem = divmod(secs, 3600)
     m, s = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{s:02d}"
-
-
-def _snr_num(snr: float | None) -> str:
-    """SNR as a bare signed number for a 'dB'-headed table column ('+14', '-')."""
-    return "-" if snr is None else f"{snr:+.0f}"
 
 
 def _fmt_num(n) -> str:
@@ -394,33 +393,6 @@ def _table(columns, rows: list[dict], inner: int) -> list[Line]:
     return out
 
 
-# RECOMMENDATION table columns: (key, header, align, drop-priority).
-# Higher drop-priority is shed first when the terminal is too narrow; the first
-# three columns (priority 0) are always kept.
-_REC_COLS = [
-    ("target", "Target", "<", 0),
-    ("band", "Band", "<", 0),
-    ("reach", "Reach", "<", 0),
-    ("trend", "Trend", "<", 1),
-    ("spots", "Spots", ">", 2),
-    ("snr", "Med dB", ">", 3),
-    ("cov", "Coverage", ">", 4),
-]
-
-# YOUR STATION "getting out" table columns (per band x continent you're heard
-# on). Band/Target/Spotters are always kept; the rest are shed on narrow
-# terminals. Trend is the band's current ("now") trend in your own spots.
-_STATION_COLS = [
-    ("band", "Band", "<", 0),
-    ("target", "Target", "<", 0),
-    ("spotters", "Spotters", ">", 0),
-    ("trend", "Trend", "<", 1),
-    ("best", "Best dB", ">", 2),
-    ("med", "Med dB", ">", 3),
-    ("speed", "Speed", ">", 4),
-]
-
-
 def _rec_body(view, history, cfg, scored, span, uc, width) -> list[Line]:
     if not scored:
         d = "—" if uc else "-"
@@ -442,39 +414,17 @@ def _rec_body(view, history, cfg, scored, span, uc, width) -> list[Line]:
     rows.append(_hr(width, uc))
 
     # --- supporting table: best band per continent ------------------------
-    data: list[tuple[str, object]] = []
-    closed: list[str] = []
-    for cont, best in best_band_per_continent(view, history,
-                                              cfg.avg_windows).items():
-        if best is None:
-            closed.append(cont)
-        else:
-            data.append((cont, best))
-
-    def cell(key, cont, best) -> str:
-        if key == "target":
-            return cont
-        if key == "band":
-            return best.band
-        if key == "reach":
-            return f"{best.reach * 100:.0f}% of {best.active_uk}"
-        if key == "trend":
-            return best.trend
-        if key == "spots":
-            return str(best.count)
-        if key == "snr":
-            return "-" if best.median_snr is None else f"{best.median_snr:+.0f}"
-        return f"~{best.coverage}"
-
+    # Values come from the shared table model so the text report and TUI can
+    # never diverge; the TUI only layers curses styles on top.
+    data, closed = rec_rows(view, history, cfg.avg_windows)
     style = {"target": "dim", "band": "accent", "reach": "good",
              "spots": "normal", "snr": "normal", "cov": "normal"}
 
     if data:
         trows = [
-            {k: (cell(k, cont, best),
-                 _trend_style(best.trend) if k == "trend" else style[k])
-             for (k, *_r) in _REC_COLS}
-            for cont, best in data
+            {k: (r[k], _trend_style(r["trend"]) if k == "trend" else style[k])
+             for (k, *_x) in _REC_COLS}
+            for r in data
         ]
         rows += _table(_REC_COLS, trows, inner)
 
@@ -540,24 +490,14 @@ def _station_body(summary, view, history, cfg, scored, span, uc,
         return rows
 
     # --- table: who is hearing you, where, and how well -------------------
-    trows: list[dict] = []
-    for band in view.mm_bands():
-        now_trend = mm_horizon_trends(history, band, cfg.window_secs)[0][1]
-        for cont in CONTINENTS:
-            obs = view.mm.get((band, cont))
-            if not obs:
-                continue
-            speed = (f"{obs.typical_speed}wpm"
-                     if obs.typical_speed is not None else "-")
-            trows.append({
-                "band": (band, "accent"),
-                "target": (cont, "dim"),
-                "spotters": (str(obs.distinct_spotters), "good"),
-                "trend": (now_trend, _trend_style(now_trend)),
-                "best": (_snr_num(obs.best_snr), "normal"),
-                "med": (_snr_num(obs.median_snr), "normal"),
-                "speed": (speed, "normal"),
-            })
+    # Shared row values (see tables.station_rows); the TUI adds styles only.
+    style = {"band": "accent", "target": "dim", "spotters": "good",
+             "best": "normal", "med": "normal", "speed": "normal"}
+    trows = [
+        {k: (r[k], _trend_style(r["trend"]) if k == "trend" else style[k])
+         for (k, *_x) in _STATION_COLS}
+        for r in station_rows(view, history, cfg.window_secs)
+    ]
     if trows:
         rows += _table(_STATION_COLS, trows, inner)
 
